@@ -40,7 +40,8 @@
     <img src="icons/icon-192.png" alt="" width="84" height="84">
     <h1>Manuais da Manutenção</h1>
     <p id="loginMsg" class="muted">Digite o código de acesso que você recebeu.</p>
-    <input id="loginCode" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="MHC-XXXXXX" enterkeyhint="go">
+    <div class="pwbox"><input id="loginCode" type="password" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="AND-SL-XXXXXX" enterkeyhint="go"><button id="eyeBtn" class="eye" type="button" aria-label="Mostrar código">👁</button></div>
+    <button id="pasteBtn" class="btn-ghost big-ghost">📋 Colar código</button>
     <button id="loginBtn" class="btn-accent big">Entrar</button>
     <p id="loginErr" class="err" hidden></p>
     <p class="muted small">O código é pessoal. Não repasse para outras pessoas.</p>

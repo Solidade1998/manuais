@@ -4,7 +4,7 @@
 // =====================================================================
 import * as pdfjsLib from './lib/pdf.min.mjs';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.2.0';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.mjs';
 const LIB = new URL('lib/', location.href).href;
 const PDF_OPTS = {
@@ -293,6 +293,46 @@ function showLogin(msg, isError) {
   if (isError) { $('#loginErr').textContent = msg; $('#loginErr').hidden = false; $('#loginMsg').textContent = 'Digite o código de acesso que você recebeu.'; }
 }
 $('#loginCode').addEventListener('keydown', e => e.key === 'Enter' && $('#loginBtn').click());
+// acha o código no meio de qualquer texto (ex.: a mensagem inteira do WhatsApp)
+function findCode(t) {
+  const m = String(t || '').toUpperCase().match(/AND[\s\-_]*SL[\s\-_]*([A-Z0-9]{6})\b/) || String(t || '').toUpperCase().match(/\bMHC[\s\-_]*([A-Z0-9]{6})\b/);
+  if (!m) return null;
+  return m[0].startsWith('AND') ? 'AND-SL-' + m[1] : 'MHC-' + m[1];
+}
+$('#loginCode').addEventListener('paste', e => {
+  const t = e.clipboardData?.getData('text'); const c = findCode(t);
+  if (c) { e.preventDefault(); $('#loginCode').value = c; }
+});
+// olhinho: mostra / esconde o código
+$('#eyeBtn').onclick = () => {
+  const i = $('#loginCode'), show = i.type === 'password';
+  i.type = show ? 'text' : 'password';
+  $('#eyeBtn').classList.toggle('on', show); $('#eyeBtn').textContent = show ? '🙈' : '👁';
+};
+const maskCode = p => p.replace(/[A-Z0-9]{6}$/, '••••••');
+function codeView(pretty) {
+  const box = el('div', { class: 'bigcode' }, maskCode(pretty));
+  const eye = el('button', { class: 'eye', type: 'button', 'aria-label': 'Mostrar código', onclick: () => {
+    const show = box.textContent !== pretty;
+    box.textContent = show ? pretty : maskCode(pretty); eye.textContent = show ? '🙈' : '👁'; eye.classList.toggle('on', show);
+  } }, '👁');
+  return el('div', { class: 'bigwrap' }, box, eye);
+}
+$('#pasteBtn').onclick = async () => {
+  try {
+    const t = await navigator.clipboard.readText();
+    const c = findCode(t) || t.trim().slice(0, 20);
+    if (!c) throw 0;
+    $('#loginCode').value = c;
+    if (findCode(t)) $('#loginBtn').click();
+  } catch { $('#loginCode').focus(); toast('Segure o dedo no campo e toque em Colar'); }
+};
+// código vindo pelo link do convite (…/#codigo=AND-SL-XXXXXX)
+(() => {
+  const m = location.hash.match(/codigo=([^&]+)/i);
+  if (m) { const c = findCode(decodeURIComponent(m[1])); if (c) lsSet('manuais.pending', c); history.replaceState(null, '', location.pathname); }
+  const p = lsGet('manuais.pending'); if (p) $('#loginCode').value = p;
+})();
 $('#loginBtn').onclick = async () => {
   const code = $('#loginCode').value.trim();
   if (!code) return;
@@ -300,7 +340,7 @@ $('#loginBtn').onclick = async () => {
   try {
     const r = await api('login', { json: { code, deviceId: deviceId() } });
     AUTH = { token: r.token, name: r.name, admin: r.admin, issued: Date.now(), lastOk: Date.now() };
-    lsSet(LS_AUTH, AUTH);
+    lsSet(LS_AUTH, AUTH); lsSet('manuais.pending', null);
     $('#loginCode').value = '';
     await startApp();
     sync(true);
@@ -1164,12 +1204,13 @@ const ago = t => {
 };
 const appUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
 function inviteText(c) {
+  const link = appUrl() + '#codigo=' + encodeURIComponent(c.pretty);
   return `Olá, ${c.name}! Seu acesso ao app *Manuais da Manutenção*:\n\n` +
-    `1️⃣ Abra este link no celular: ${appUrl()}\n` +
-    `2️⃣ Instale o app:\n   • Android (Chrome): menu ⋮ → *Adicionar à tela inicial*\n   • iPhone (Safari): Compartilhar → *Adicionar à Tela de Início*\n` +
-    `3️⃣ Abra o app pelo ícone e digite o código:\n\n*${c.pretty}*\n\n` +
-    `Os manuais baixam sozinhos (use Wi-Fi, são cerca de ${fmtMB(S.docs.reduce((a, d) => a + (d.rid ? d.size : 0), 0) || 140 * 1048576)}). ` +
-    `O código é pessoal e funciona em até ${c.max} celular${c.max > 1 ? 'es' : ''}. Não repasse.`;
+    `1️⃣ Toque no link (o código já vai preenchido):\n${link}\n\n` +
+    `2️⃣ Instale o app:\n   • Android (Chrome): menu ⋮ → *Adicionar à tela inicial*\n   • iPhone (Safari): Compartilhar → *Adicionar à Tela de Início*\n\n` +
+    `3️⃣ Abra o app pelo ícone. Se pedir o código, copie esta mensagem inteira e toque em *📋 Colar código*.\n\n` +
+    `Seu código: ${c.pretty}\n\n` +
+    `Os manuais baixam sozinhos (use Wi-Fi). O código é pessoal e funciona em até ${c.max} celular${c.max > 1 ? 'es' : ''}. Não repasse.`;
 }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast('Copiado'); }
@@ -1200,7 +1241,7 @@ async function renderAdmin() {
         el('div', { class: 't' }, c.name,
           c.blocked ? el('span', { class: 'badge red' }, 'Bloqueado') : n ? el('span', { class: 'badge ok' }, 'Ativo') : el('span', { class: 'badge warn' }, 'Não usado'),
           recentTry ? el('span', { class: 'badge red' }, `⚠ ${recentTry} tentativa${recentTry > 1 ? 's' : ''}`) : null),
-        el('div', { class: 's' }, `${c.pretty} · ${n}/${c.max} celular${c.max > 1 ? 'es' : ''} · último uso: ${ago(last)}`)),
+        el('div', { class: 's' }, `${maskCode(c.pretty)} · ${n}/${c.max} celular${c.max > 1 ? 'es' : ''} · último uso: ${ago(last)}`)),
       el('div', { class: 'pg' }, '›')));
   }
   // ---- manuais ----
@@ -1247,7 +1288,7 @@ function codeSheet(c, fresh) {
   openSheet(el('div', {},
     el('h4', {}, c.name, c.blocked ? el('span', { class: 'badge red' }, 'Bloqueado') : null),
     fresh ? el('p', { class: 'muted', style: 'margin:0' }, 'Código criado! Envie para a pessoa:') : null,
-    el('div', { class: 'bigcode' }, c.pretty),
+    codeView(c.pretty),
     el('div', { class: 'acts' },
       el('button', { class: 'ok', onclick: () => window.open('https://wa.me/?text=' + encodeURIComponent(inviteText(c)), '_blank') }, '📲 Enviar pelo WhatsApp'),
       el('button', { onclick: () => copyText(inviteText(c)) }, 'Copiar mensagem')),
@@ -1357,4 +1398,4 @@ if ('serviceWorker' in navigator) {
   }).catch(e => console.warn('SW', e));
 }
 // para testes
-window.__app = { S, V, get AUTH() { return AUTH; }, sync };
+window.__app = { S, V, findCode, get AUTH() { return AUTH; }, sync };
