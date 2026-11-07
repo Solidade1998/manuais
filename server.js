@@ -149,10 +149,49 @@ export async function onRequest(context) {
       return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, no-store' } });
     }
 
+    // ---------------- checklists (cada pessoa envia os seus) ----------------
+    //  ck:<CÓDIGO>:<id>  inspeção completa; o resumo vai no metadata para a lista do admin
+    if (path[0] === 'ck' && path[1] === 'save' && method === 'POST') {
+      const raw = await request.text();
+      if (raw.length > 200000) return fail('Checklist grande demais.', 413);
+      const i = JSON.parse(raw || '{}');
+      const id = String(i.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 40);
+      if (!id || !i.cat || !i.mhc) return fail('Checklist incompleto.');
+      const st = i.sum || {};
+      const meta = { n: String(who.name || '').slice(0, 60), m: String(i.mhc).slice(0, 6), c: String(i.cat).slice(0, 6), e: String(i.escopo || '').slice(0, 1),
+        i: +i.inicio || 0, f: +i.fim || 0, u: +i.upd || Date.now(), ok: +st.ok || 0, nok: +st.nok || 0, na: +st.na || 0, tot: +st.tot || 0, falta: +st.falta || 0 };
+      await env.DB.put(`ck:${who.code}:${id}`, JSON.stringify({ ...i, by: meta.n }), { metadata: meta });
+      return json({ ok: true });
+    }
+    if (path[0] === 'ck' && path[1] === 'delete' && method === 'POST') {
+      const body = await request.json().catch(() => ({}));
+      const id = String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 40);
+      if (id) await env.DB.delete(`ck:${who.code}:${id}`);
+      return json({ ok: true });
+    }
+
     // ================= ADMINISTRADOR =================
     if (path[0] !== 'admin') return fail('Rota desconhecida', 404);
     if (!who.admin) return fail('Somente o administrador.', 403);
     const what = path[1];
+
+    // checklists da equipe: lista (só o resumo) e um completo
+    if (what === 'ck' && method === 'GET' && path.length === 2) {
+      const out = [];
+      let cursor;
+      do {
+        const page = await env.DB.list({ prefix: 'ck:', cursor });
+        for (const k of page.keys) { const [, code, id] = k.name.split(':'); out.push({ code, id, ...(k.metadata || {}) }); }
+        cursor = page.list_complete ? null : page.cursor;
+      } while (cursor);
+      out.sort((a, b) => (b.i || 0) - (a.i || 0));
+      return json({ list: out });
+    }
+    if (what === 'ck' && method === 'GET' && path.length === 4) {
+      const i = await env.DB.get(`ck:${cleanCode(path[2]) || 'ADMIN'}:${path[3].replace(/[^a-z0-9]/gi, '')}`, { type: 'json' });
+      if (!i) return fail('Checklist não encontrado.', 404);
+      return json({ insp: i });
+    }
 
     if (what === 'codes' && method === 'GET') {
       const out = [];

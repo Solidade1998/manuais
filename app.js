@@ -1530,6 +1530,7 @@ async function renderAdmin() {
   }
   box.innerHTML = '';
   // ---- acessos ----
+  box.append(el('button', { class: 'row', style: 'justify-content:center;font-weight:700', onclick: () => { location.href = 'checklist#equipe'; } }, '📋 Checklists da equipe'));
   box.append(el('h3', { class: 'sec' }, `Acessos da equipe (${ADM.codes.length})`));
   box.append(el('button', { class: 'row', style: 'justify-content:center;font-weight:700;color:var(--accent2)', onclick: newCodeSheet }, '＋ Novo acesso'));
   for (const c of ADM.codes) {

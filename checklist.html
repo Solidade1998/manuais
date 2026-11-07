@@ -277,61 +277,52 @@ function saveLocal(){
   try{ localStorage.setItem(KI,JSON.stringify(S.insps)); localStorage.setItem(KP,JSON.stringify(S.prof)); }catch(e){}
 }
 
-/* ---------- nuvem (conta Claude, privado por pessoa) ---------- */
-let COL=null, PROF=null, dirty=new Set(), profDirty=false, flushT=null, flushing=false, syncState='local';
+/* ---------- envio para o servidor (o admin vê os checklists da equipe) ----------
+   Para gastar pouco do limite grátis do Cloudflare, envia no máximo a cada 4 min
+   enquanto você mexe, na hora ao finalizar/apagar, e quando o app vai para segundo plano. */
+const AUTH=(()=>{ try{ return JSON.parse(localStorage.getItem('manuais.auth')||'{}')||{}; }catch(e){ return {}; } })();
+const KS='mhc80ck.sent.v1';
+let SENT=(()=>{ try{ return JSON.parse(localStorage.getItem(KS)||'{}')||{}; }catch(e){ return {}; } })();
+let DEL=(()=>{ try{ return JSON.parse(localStorage.getItem(KS+'.del')||'[]')||[]; }catch(e){ return []; } })();
+let flushT=null, flushing=false, syncState='local';
+const saveSent=()=>{ try{ localStorage.setItem(KS,JSON.stringify(SENT)); localStorage.setItem(KS+'.del',JSON.stringify(DEL)); }catch(e){} };
+const pendingIds=()=>Object.values(S.insps).filter(i=>(i.upd||0)>(SENT[i.id]||0)).map(i=>i.id);
 function setSync(s){ syncState=s; const el=document.getElementById('sync'); if(el){ el.className='sync '+({cloud:'cloud',busy:'busy',offline:'off'}[s]||''); el.textContent=syncText(); } }
-function syncText(){ return ({cloud:'Salvo na conta',busy:'Salvando…',offline:'Sem sinal · salvo no celular'}[syncState]||'Salvo no celular'); }
-function touch(insp){ insp.upd=Date.now(); saveLocal(); dirty.add(insp.id); schedule(); }
-function touchProf(){ S.prof.upd=Date.now(); saveLocal(); profDirty=true; schedule(); }
-function schedule(ms){ clearTimeout(flushT); flushT=setTimeout(flush, ms||800); }
-async function flush(){
-  if(!COL || flushing) return;
-  flushing=true; setSync('busy');
-  let retry=false;
-  try{
-    for(const id of [...dirty]){
-      dirty.delete(id);
-      const i=S.insps[id];
-      try{
-        if(!i) await COL.doc(id).delete();
-        else await COL.doc(id).set(JSON.parse(JSON.stringify(i)));
-      }catch(e){
-        if(e && (e.code==='unavailable'||e.code==='resource_exhausted')){ dirty.add(id); retry=true; break; }
-        if(e && e.code==='quota_exceeded'){ toast('Limite de armazenamento na conta atingido. Apague inspeções antigas.'); }
-        else { COL=null; setSync('local'); flushing=false; return; }
-      }
-    }
-    if(profDirty && PROF){ profDirty=false; try{ await PROF.set(JSON.parse(JSON.stringify(S.prof))); }catch(e){ profDirty=true; retry=true; } }
-  }finally{ flushing=false; }
-  if(retry){ setSync('offline'); schedule(6000); }
-  else { setSync('cloud'); if(dirty.size||profDirty) schedule(); }
+function syncText(){ return ({cloud:'Enviado',busy:'Enviando…',offline:'Sem sinal · salvo no celular'}[syncState]||'Salvo no celular'); }
+async function api(path,body,keepalive){
+  const r=await fetch('api/'+path,{method:body?'POST':'GET',headers:Object.assign({authorization:'Bearer '+(AUTH.token||'')},body?{'content-type':'application/json'}:{}),body:body?JSON.stringify(body):undefined,cache:'no-store',keepalive:!!keepalive});
+  const d=await r.json().catch(()=>({})); if(!r.ok){ const e=new Error(d.error||('Erro '+r.status)); e.status=r.status; throw e; } return d;
 }
-async function initCloud(){
-  if(!window.claude || typeof window.claude.use!=='function'){ setSync('local'); return; }
-  try{
-    const [u,db]=await Promise.all([claude.use('user'),claude.use('db')]);
-    if(!u||!db){ setSync('local'); return; }
-    const id=await u.id(); if(!id){ setSync('local'); return; }
-    COL=db.doc('data/users/'+id+'/main').collection('insp');
-    PROF=db.doc('data/users/'+id+'/profile');
-    let first=true;
-    const t=setTimeout(()=>{ if(first) setSync('offline'); },10000);
-    COL.onSnapshot(snap=>{
-      let changed=false;
-      snap.docs.forEach(d=>{ const r=d.data(); if(!r||!r.id) return; const l=S.insps[r.id];
-        if(!l || (r.upd||0)>(l.upd||0)){ S.insps[r.id]=JSON.parse(JSON.stringify(r)); changed=true; } });
-      if(first && !snap.metadata.fromCache){
-        first=false; clearTimeout(t);
-        const ids=new Set(snap.docs.map(d=>d.id));
-        Object.keys(S.insps).forEach(k=>{ if(!ids.has(k)) dirty.add(k); });
-        if(dirty.size) schedule(300); else setSync('cloud');
-      }
-      if(changed){ saveLocal(); softRender(); }
-    }, e=>{ clearTimeout(t); COL=null; setSync('local'); });
-    const ps=await PROF.get();
-    if(ps.exists){ const r=ps.data(); if((r.upd||0)>(S.prof.upd||0)){ S.prof=JSON.parse(JSON.stringify(r)); saveLocal(); softRender(); } }
-    else if(S.prof.upd){ profDirty=true; schedule(); }
-  }catch(e){ COL=null; setSync('local'); }
+function touch(insp){ insp.upd=Date.now(); saveLocal(); if(syncState==='cloud') setSync('local'); schedule(240000); }
+function touchProf(){ S.prof.upd=Date.now(); saveLocal(); }
+function schedule(ms){ if(ms===0){ clearTimeout(flushT); flushT=setTimeout(flush,50); return; } if(!flushT) flushT=setTimeout(flush, ms); }
+async function flush(keep){
+  clearTimeout(flushT); flushT=null;
+  if(flushing||!AUTH.token) return; flushing=true;
+  const ids=pendingIds(); if(!ids.length&&!DEL.length){ flushing=false; setSync('cloud'); return; }
+  setSync('busy'); let fail=false;
+  for(const id of [...DEL]){ try{ await api('ck/delete',{id},keep); DEL=DEL.filter(x=>x!==id); delete SENT[id]; saveSent(); }catch(e){ fail=true; break; } }
+  for(const id of ids){ const i=S.insps[id]; if(!i||fail) continue;
+    try{ const up=i.upd; await api('ck/save',Object.assign({},i,{sum:stats(i)}),keep); SENT[id]=up; saveSent(); }
+    catch(e){ fail=true; if(e.status===401||e.status===403){ setSync('local'); flushing=false; return; } } }
+  flushing=false;
+  if(fail){ setSync('offline'); schedule(120000); } else setSync(pendingIds().length?'local':'cloud');
+}
+function initCloud(){ if(pendingIds().length||DEL.length) schedule(3000); else setSync('cloud'); }
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&(pendingIds().length||DEL.length)) flush(true); });
+window.addEventListener('online',()=>{ if(pendingIds().length||DEL.length) schedule(0); });
+
+/* ---------- admin: checklists da equipe ---------- */
+let TEAM={list:null,err:'',insp:null};
+async function loadTeam(){
+  TEAM.err=''; TEAM.list=null; render();
+  try{ TEAM.list=(await api('admin/ck')).list; }catch(e){ TEAM.err=e.status?e.message:'Sem internet. Tente de novo com sinal.'; }
+  if(V.v==='team') render();
+}
+async function openRemote(code,id){
+  toast('Abrindo…');
+  try{ TEAM.insp=(await api('admin/ck/'+encodeURIComponent(code)+'/'+encodeURIComponent(id))).insp; go({v:'sheet',ro:true}); }
+  catch(e){ toast(e.status?e.message:'Sem internet'); }
 }
 
 /* ===================== HELPERS ===================== */
@@ -396,6 +387,7 @@ function vHome(){
     ${recent.length?`<div class="stack" style="margin-top:14px;gap:6px"><span class="small muted">Já inspecionados</span><div class="chips">${recent.map(m=>`<button class="chip" data-act="openMhc" data-m="${h(m)}">MHC80-${h(m)}</button>`).join('')}</div></div>`:''}
   </section>
   ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
+  ${AUTH.admin?`<button class="btn full" data-act="team">Checklists da equipe (admin)</button>`:''}
   <section class="card stack" style="gap:8px"><b>Cópia de segurança</b>
     <span class="small muted">As inspeções ficam guardadas neste celular. Faça uma cópia de vez em quando, ou antes de trocar de celular ou limpar os dados do navegador.</span>
     <div class="row"><button class="btn alt" data-act="exp">Salvar cópia</button><button class="btn ghost" data-act="imp">Restaurar cópia</button></div>
@@ -526,7 +518,8 @@ function vReg(){
 function rbox(r){ return `<div class="rbox">${['ok','nok','na'].map(k=>`<span class="${r===k?'x '+k:''}">(${r===k?'X':'&nbsp;&nbsp;'}) ${k==='na'?'N/A':RLBL[k]}</span>`).join('')}</div>`; }
 
 function vSheet(){
-  const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
+  const insp=curInsp(); if(!insp){ V={v:'home'}; return vHome(); }
+  const ro=!!V.ro;
   const c=CAT[insp.cat], all=itemsOf(insp), st=stats(insp), sc=scoped(insp);
   const mant=(insp.mant||[]).filter(m=>m.nome||m.mat);
   let html=topBar(`Folha · MHC80-${h(insp.mhc)} · <b>${c.nome}</b>`,true)+`<div class="stack">
@@ -537,26 +530,27 @@ function vSheet(){
      <div><span>Fim</span><b>${insp.fim?fmtD(insp.fim)+' às '+fmtH(insp.fim):'em andamento'}</b></div>
      <div><span>Escopo a ser executado</span><b>(X) ${ESC[insp.escopo]}</b></div>
      <div><span>Visita · Duração</span><b>N/A · Não medido</b></div>
+     ${ro?`<div style="grid-column:1/-1"><span>Enviado por</span><b>${h(insp.by)||'—'}</b></div>`:''}
      <div style="grid-column:1/-1"><span>Banco de assinaturas · Mantenedores</span>${mant.length?mant.map(m=>`<b>${h(m.nome)} / ${h(m.mat)} / ${h(m.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
    </section>
    <div class="tally"><div><b>${st.ok}</b><span>Ok</span></div><div><b style="color:var(--nok)">${st.nok}</b><span>Não Ok</span></div><div><b>${st.na}</b><span>N/A</span></div><div><b style="color:var(--warn)">${st.tot-st.done}</b><span>Sem resposta</span></div></div>
-   <p class="small muted" style="margin:0">Toque numa linha para corrigir a resposta.</p>`;
+   <p class="small muted" style="margin:0">${ro?'Somente leitura: checklist de outra pessoa.':'Toque numa linha para corrigir a resposta.'}</p>`;
   c.conds.forEach((cd,ci)=>{
     const rows=all.filter(i=>i.ci===ci);
     html+=`<h3>Condição: ${h(cd.c)}</h3><div class="tblwrap"><table><thead><tr><th>Seq</th><th>Atividade</th><th>Resultado encontrado</th><th>Esc.</th></tr></thead><tbody>`+
       rows.map(i=>{ const a=insp.ans[i.key]||{}; const pos=sc.findIndex(x=>x.key===i.key);
         if(!i.inScope) return `<tr class="out"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}</td><td class="small">fora do escopo</td><td class="esc">${i.esc}</td></tr>`;
-        return `<tr class="click" data-act="goto" data-p="${pos}"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}${a.r==='nok'&&!(a.falha||'').trim()?'<div class="pend">Falta descrever a falha</div>':''}</td><td>${a.r?rbox(a.r):'<span class="pend">Sem resposta</span>'}</td><td class="esc">${i.esc}</td></tr>`;
+        return `<tr ${ro?'':`class="click" data-act="goto" data-p="${pos}"`}><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}${a.r==='nok'&&!(a.falha||'').trim()?'<div class="pend">Falta descrever a falha</div>':''}</td><td>${a.r?rbox(a.r):'<span class="pend">Sem resposta</span>'}</td><td class="esc">${i.esc}</td></tr>`;
       }).join('')+`</tbody></table></div>`;
   });
   const reg=sc.filter(i=>(insp.ans[i.key]||{}).r==='nok');
-  html+=`<h3>Registro de solicitações de tráfego (atividades corretivas)</h3>`+(reg.length?`<button class="btn y" data-act="reg" data-id="${insp.id}">Preencher / editar registro</button>`:'');
+  html+=`<h3>Registro de solicitações de tráfego (atividades corretivas)</h3>`+(reg.length&&!ro?`<button class="btn y" data-act="reg" data-id="${insp.id}">Preencher / editar registro</button>`:'');
   if(!reg.length) html+=`<p class="muted" style="margin:0">Nenhum Não Ok. Nada para registrar no verso.</p>`;
   else html+=`<div class="tblwrap"><table class="reg"><thead><tr><th>Seq</th><th>Falha encontrada</th><th>Ação corretiva</th><th>Material</th><th>Nº OS</th><th>Passei</th></tr></thead><tbody>`+
     reg.map(i=>{ const a=insp.ans[i.key]; const cp=(insp.cp||{})[i.key];
       return `<tr class="${cp?'done':''}"><td class="seq">${h(i.seq)}</td><td>${h(a.falha)||'<span class="pend">preencher</span>'}${a.corr?'<div class="small" style="color:var(--ok);font-weight:700">(X) Corrigido</div>':''}</td><td>${h(a.acao)}</td><td>${h(a.mat)}</td><td>${h(a.os)}</td>
-        <td><button class="tick ${cp?'on':''}" data-act="cp" data-k="${i.key}" aria-label="Marcar como passado para a folha">${cp?'✓':''}</button></td></tr>`; }).join('')+`</tbody></table></div>`;
-  html+=`<div class="row"><button class="btn y" data-act="copy">Copiar resumo em texto</button>${insp.fim?'':`<button class="btn alt" data-act="wiz" data-id="${insp.id}">Continuar checklist</button>`}</div>
+ <td><button class="tick ${cp?'on':''}" ${ro?'disabled':''} data-act="cp" data-k="${i.key}" aria-label="Marcar como passado para a folha">${cp?'✓':''}</button></td></tr>`; }).join('')+`</tbody></table></div>`;
+  html+=`<div class="row"><button class="btn y" data-act="copy">Copiar resumo em texto</button>${insp.fim||ro?'':`<button class="btn alt" data-act="wiz" data-id="${insp.id}">Continuar checklist</button>`}</div>
    ${V.copyText?`<textarea class="copy" readonly id="copyTxt">${h(V.copyText)}</textarea>`:''}
   </div>`;
   return html;
@@ -571,6 +565,21 @@ function vAsk(){
    <p class="small muted" style="margin:0">${h(it.atv)}</p>
    <button class="btn danger full" data-act="askYes">Sim, comentar a falha</button>
    <button class="btn ghost full" data-act="askNo">Não, seguir o checklist</button></div></div>`;
+}
+function vTeam(){
+  let html=topBar('Checklists da <b>equipe</b>',true)+'<div class="stack">';
+  html+=`<div class="row" style="justify-content:space-between"><span class="small muted">Só o administrador vê esta tela.</span><button class="btn ghost" data-act="teamReload">Atualizar</button></div>`;
+  if(TEAM.err) return html+`<div class="card">${h(TEAM.err)}</div></div>`;
+  if(!TEAM.list) return html+'<p class="muted">Carregando…</p></div>';
+  if(!TEAM.list.length) return html+'<p class="muted">Ninguém enviou checklist ainda.</p></div>';
+  const by={}; TEAM.list.forEach(x=>{ (by[x.n||'Sem nome']=by[x.n||'Sem nome']||[]).push(x); });
+  Object.keys(by).sort((a,b)=>a.localeCompare(b,'pt')).forEach(n=>{
+    html+=`<h3>${h(n)} <span class="small muted">· ${by[n].length}</span></h3>`;
+    html+=by[n].map(x=>`<button class="catcard" data-act="openR" data-code="${h(x.code)}" data-id="${h(x.id)}">
+      <div class="row" style="justify-content:space-between;width:100%"><b>MHC80-${h(x.m)} · ${h((CAT[x.c]||{}).nome||x.c)}</b>${x.f?(x.nok?`<span class="pill p-nok">${x.nok} Não Ok</span>`:'<span class="pill p-ok">Concluída</span>'):`<span class="pill p-open">${(x.ok||0)+(x.nok||0)+(x.na||0)}/${x.tot||0}</span>`}</div>
+      <span class="small muted">${fmt(x.i)} · ${ESC[x.e]||''}${x.f?'':' · em andamento'}${x.falta?' · registro pendente':''}</span></button>`).join('');
+  });
+  return html+'</div>';
 }
 function vConfirm(){
   if(!V.confirm) return '';
@@ -605,6 +614,7 @@ function render(){
     case 'wiz': html=vWiz(); break;
     case 'sheet': html=vSheet(); break;
     case 'reg': html=vReg(); break;
+    case 'team': html=vTeam(); break;
     default: html=vHome();
   }
   $app.innerHTML=html+vConfirm()+vAsk();
@@ -618,7 +628,7 @@ document.addEventListener('focusout',()=>{ setTimeout(()=>{ if(pendingRender) so
 function go(v){ V=v; render(); window.scrollTo(0,0); }
 
 /* ===================== AÇÕES ===================== */
-function curInsp(){ return S.insps[V.id]; }
+function curInsp(){ return V.ro? TEAM.insp : S.insps[V.id]; }
 function goMhc(){
   const el=document.getElementById('mhcIn'); const m=normMhc(el&&el.value);
   if(!m){ toast('Digite o número do MHC, ex.: 04'); el&&el.focus(); return; }
@@ -627,6 +637,8 @@ function goMhc(){
 function back(){
   if(V.v==='mhc') go({v:'home'});
   else if(V.v==='cat'){ draft=null; go({v:'mhc',mhc:V.mhc}); }
+  else if(V.v==='sheet'&&V.ro) go({v:'team'});
+  else if(V.v==='team') go({v:'home'});
   else if(V.v==='reg'&&V.only) go({v:'wiz',id:V.id,pos:V.ret});
   else if(V.v==='wiz'||V.v==='sheet'||V.v==='reg'){ const i=curInsp(); go(i?{v:'cat',mhc:i.mhc,cat:i.cat}:{v:'home'}); }
   else go({v:'home'});
@@ -685,7 +697,7 @@ document.addEventListener('click',e=>{
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
   if(act==='prev'){ V.pos=Math.max(0,V.pos-1); render(); window.scrollTo(0,0); return; }
-  if(act==='finish'){ const i=curInsp(); i.fim=Date.now(); touch(i); toast('Inspeção finalizada'); return go({v:'sheet',id:i.id}); }
+  if(act==='finish'){ const i=curInsp(); i.fim=Date.now(); touch(i); schedule(0); toast('Inspeção finalizada'); return go({v:'sheet',id:i.id}); }
   if(act==='cp'){ const i=curInsp(); i.cp=i.cp||{}; i.cp[b.dataset.k]=!i.cp[b.dataset.k]; touch(i); return render(); }
   if(act==='copy'){
     const txt=textOf(curInsp());
@@ -704,7 +716,10 @@ document.addEventListener('click',e=>{
   if(act==='imp'){ document.getElementById('impFile').click(); return; }
   if(act==='askDel'){ V.confirm=b.dataset.id; return render(); }
   if(act==='noDel'){ V.confirm=null; return render(); }
-  if(act==='del'){ const id=V.confirm; delete S.insps[id]; V.confirm=null; saveLocal(); dirty.add(id); schedule(); toast('Inspeção apagada'); return render(); }
+  if(act==='del'){ const id=V.confirm; delete S.insps[id]; V.confirm=null; saveLocal(); if(SENT[id]){ DEL.push(id); saveSent(); schedule(0); } toast('Inspeção apagada'); return render(); }
+  if(act==='team'){ go({v:'team'}); return loadTeam(); }
+  if(act==='teamReload') return loadTeam();
+  if(act==='openR') return openRemote(b.dataset.code,b.dataset.id);
 });
 document.addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.id==='mhcIn') goMhc(); });
 document.addEventListener('input',e=>{
@@ -731,7 +746,7 @@ document.addEventListener('change',e=>{ const t=e.target;
 
 /* ===================== START ===================== */
 loadLocal();
-render();
+if(location.hash==='#equipe'&&AUTH.admin){ V={v:'team'}; render(); loadTeam(); } else render();
 initCloud();
 </script>
 </body>
