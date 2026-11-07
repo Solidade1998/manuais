@@ -134,6 +134,13 @@ export async function onRequest(context) {
     // ---------------- lista de manuais ----------------
     if (path[0] === 'docs' && method === 'GET') return json({ docs: await getDocs(env) });
 
+    // ---------------- sumário automático (montado pelo app do admin) ----------------
+    if (path[0] === 'auto' && method === 'GET' && path.length === 3) {
+      const a = await env.DB.get(`auto:${path[1]}:${path[2]}`, { type: 'json' });
+      if (!a) return fail('Sem sumário', 404);
+      return json({ auto: a });
+    }
+
     // ---------------- baixar pedaço de um manual ----------------
     if (path[0] === 'file' && method === 'GET' && path.length === 4) {
       const [, rid, sha, i] = path;
@@ -220,6 +227,16 @@ export async function onRequest(context) {
       await env.DB.put('docs', JSON.stringify(docs));
       return json({ ok: true, docs });
     }
+    // guardar o sumário automático de um manual
+    if (what === 'auto' && method === 'POST') {
+      const d = await request.json();
+      if (!d?.rid || !d.sha || !Array.isArray(d.auto)) return fail('Dados incompletos.');
+      await env.DB.put(`auto:${d.rid}:${d.sha}`, JSON.stringify(d.auto));
+      const docs = await getDocs(env);
+      const old = docs.find(x => x.rid === d.rid);
+      if (old && old.sha === d.sha && old.ha !== d.sha) { old.ha = d.sha; await env.DB.put('docs', JSON.stringify(docs)); }
+      return json({ ok: true });
+    }
     // só renomear / mudar grupo
     if (what === 'docmeta' && method === 'POST') {
       const d = await request.json();
@@ -242,6 +259,7 @@ export async function onRequest(context) {
       const old = docs.find(x => x.rid === rid);
       if (!old) return json({ ok: true, docs });
       for (let i = 0; i < old.parts; i++) await partDel(env, `part:${old.rid}:${old.sha}:${i}`);
+      await env.DB.delete(`auto:${old.rid}:${old.sha}`).catch(() => {});
       const rest = docs.filter(x => x.rid !== rid);
       await env.DB.put('docs', JSON.stringify(rest));
       return json({ ok: true, docs: rest });

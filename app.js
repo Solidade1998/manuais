@@ -4,7 +4,7 @@
 // =====================================================================
 import * as pdfjsLib from './lib/pdf.min.mjs';
 
-const APP_VERSION = '3.2.0';
+const APP_VERSION = '3.3.0';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.mjs';
 const LIB = new URL('lib/', location.href).href;
 const PDF_OPTS = {
@@ -388,6 +388,19 @@ $('#loginBtn').onclick = async () => {
   } finally { btn.disabled = false; btn.textContent = 'Entrar'; }
 };
 
+// O app do administrador monta o sumário automático dos PDFs sem sumário e
+// manda para a nuvem, para quem abre pela nuvem também ter.
+let pushing = false;
+async function pushAutos() {
+  if (!AUTH.admin || pushing) return; pushing = true;
+  try {
+    for (const d of S.docs.filter(d => d.rid && d.textDone && !d.outline?.length && d.auto?.length && d.autoUp !== d.sha)) {
+      try { await api('admin/auto', { json: { rid: d.rid, sha: d.sha, auto: d.auto } }); d.autoUp = d.sha; await saveDoc(d); }
+      catch (e) { if (!e.status) break; }
+    }
+  } finally { pushing = false; }
+}
+
 async function wipeAll(reason) {
   closeViewer(true);
   for (const d of [...S.docs]) await removeLocalDoc(d).catch(() => {});
@@ -479,6 +492,7 @@ async function sync(manual) {
   } finally {
     syncing = false; syncBar(null);
     refreshCloud(lastRemote);
+    pushAutos();
     if ($('#home').classList.contains('active')) renderHome(true);
     indexQueue();
   }
@@ -493,14 +507,14 @@ let lastRemote = null;
 const LS_REMOTE = 'manuais.remote';
 const showCloud = () => lsGet('manuais.showcloud', true);
 function refreshCloud(remote) {
-  if (remote) lsSet(LS_REMOTE, remote.map(({ rid, sha, parts, name, file, group, order, cat, brand, size, pages }) => ({ rid, sha, parts, name, file, group, order, cat, brand, size, pages })));
+  if (remote) lsSet(LS_REMOTE, remote.map(({ rid, sha, parts, name, file, group, order, cat, brand, size, pages, ha }) => ({ rid, sha, parts, name, file, group, order, cat, brand, size, pages, ha })));
   const rem = remote || lsGet(LS_REMOTE, []) || [];
   const meta = lsGet('manuais.cloudmeta', {}) || {};
   S.cloud = rem.filter(r => !S.docs.some(d => d.rid === r.rid)).map(r => {
     const old = S.cloud.find(c => c.rid === r.rid && c.sha === r.sha);
-    if (old) return Object.assign(old, { name: r.name, group: r.group || '', order: r.order, cat: r.cat, brand: r.brand || null, _cats: null });
+    if (old) return Object.assign(old, { name: r.name, group: r.group || '', order: r.order, cat: r.cat, brand: r.brand || null, ha: r.ha, _cats: null });
     const m = meta[r.rid] || {};
-    return { id: 'c:' + r.rid, rid: r.rid, sha: r.sha, parts: r.parts, cloud: true, name: r.name, file: r.file, group: r.group || '', order: r.order, cat: r.cat,
+    return { id: 'c:' + r.rid, rid: r.rid, sha: r.sha, parts: r.parts, cloud: true, ha: r.ha, name: r.name, file: r.file, group: r.group || '', order: r.order, cat: r.cat,
       brand: r.brand || null, size: r.size, pages: r.pages, outline: null, auto: null, favs: m.favs || [], lastPage: m.lastPage || 1, opened: m.opened || 0,
       catFix: {}, textDone: true, textProgress: 1 };
   });
@@ -527,6 +541,10 @@ async function openCloud(d, then) {
   if (!d.outline) {
     try { const pdf = await getPdf(d.id); d.outline = await readOutline(pdf); d.pages = pdf.numPages; d._cats = d._flat = null; }
     catch { d.outline = []; }
+  }
+  // sem sumário próprio: usa o sumário automático que o administrador mandou para a nuvem
+  if (!d.outline?.length && !d.auto && d.ha === d.sha) {
+    try { d.auto = (await api(`auto/${d.rid}/${d.sha}`)).auto; d._cats = d._flat = null; } catch {}
   }
   then();
 }
@@ -595,6 +613,7 @@ async function indexDoc(d) {
     await dbPut('text', rec, d.id);
     d.textDone = true; d.textProgress = 1; d._cats = d._flat = null;
     await saveDoc(d);
+    pushAutos();
     S.texts.delete(d.id);
     renderAfterIndex(d);
   } catch (err) {
