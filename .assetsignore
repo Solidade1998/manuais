@@ -1,0 +1,9 @@
+.git
+functions
+worker.js
+server.js
+wrangler.jsonc
+_routes.json
+.assetsignore
+LEIA-ME.md
+path.js
