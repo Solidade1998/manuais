@@ -382,14 +382,14 @@ let toastT;
 function toast(msg){ let el=document.querySelector('.toast'); if(!el){ el=document.createElement('div'); el.className='toast'; el.setAttribute('role','status'); document.body.appendChild(el);} el.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>el.remove(),2600); }
 
 /* ===================== VIEWS ===================== */
-function top(title, back){
+function topBar(title, back){
   return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:''}<div class="ttl">${title}</div><span id="sync" class="sync">${syncText()}</span></header>`;
 }
 
 function vHome(){
   const recent=mhcList();
   const abertas=Object.values(S.insps).filter(i=>!i.fim).sort((a,b)=>(b.upd||0)-(a.upd||0));
-  return top('Checklist <b>MHC80</b>').replace('<div class="ttl">','<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a><div class="ttl">') + `<div class="stack">
+  return topBar('Checklist <b>MHC80</b>').replace('<div class="ttl">','<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a><div class="ttl">') + `<div class="stack">
   <section class="ask">
     <label for="mhcIn">Qual MHC você está?</label>
     <div class="mhcin"><span>MHC80-</span><input id="mhcIn" inputmode="numeric" maxlength="3" placeholder="04" autocomplete="off"><button data-act="goMhc">Abrir</button></div>
@@ -424,14 +424,14 @@ function vMhc(){
     const n=c.conds.reduce((s,cd)=>s+cd.itens.length,0);
     return `<button class="catcard" data-act="openCat" data-c="${c.id}"><span class="nm">${c.nome}</span><span class="small muted">${c.conds.map(cd=>cd.c).join(' + ')} · ${n} itens</span>${info}${b}</button>`;
   }).join('');
-  return top(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">${cards}
+  return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">${cards}
     <button class="catcard" disabled><span class="nm">Elétrico</span><span class="small muted">Em breve</span></button></div>`;
 }
 
 function vCat(){
   const c=CAT[V.cat], list=inspsFor(V.mhc,V.cat);
   const aberta=list.find(i=>!i.fim);
-  let html=top(`MHC80-${h(V.mhc)} · <b>${c.nome}</b>`,true)+'<div class="stack">';
+  let html=topBar(`MHC80-${h(V.mhc)} · <b>${c.nome}</b>`,true)+'<div class="stack">';
   if(aberta && !draft) html+=cardInsp(aberta);
   if(draft){
     const d=draft;
@@ -467,7 +467,7 @@ function vWiz(){
   if(V.pos>=items.length) return vSummary(insp,items,st,ttl);
   const it=items[V.pos], a=insp.ans[it.key]||{};
   const lig=it.cond===LIG;
-  let html=top(ttl,true)+`<div class="stack">
+  let html=topBar(ttl,true)+`<div class="stack">
    <div class="prog"><span>${V.pos+1} de ${items.length}</span>${bar(st)}</div>
    <div class="cond ${lig?'lig':''}">${lig?'⚠ ':''}${h(it.cond)}</div>
    <article class="task">
@@ -490,7 +490,7 @@ function vWiz(){
 function vSummary(insp,items,st,ttl){
   const falt=items.map((it,ix)=>({it,ix,a:insp.ans[it.key]})).filter(o=>!o.a||!o.a.r);
   const nokSem=items.map((it,ix)=>({it,ix,a:insp.ans[it.key]})).filter(o=>o.a&&o.a.r==='nok'&&!(o.a.falha||'').trim());
-  return top(ttl,true)+`<div class="stack">
+  return topBar(ttl,true)+`<div class="stack">
     <h2>${insp.fim?'Inspeção finalizada':'Fim do checklist'}</h2>
     <div class="tally"><div><b>${st.ok}</b><span>Ok</span></div><div><b style="color:var(--nok)">${st.nok}</b><span>Não Ok</span></div><div><b>${st.na}</b><span>N/A</span></div><div><b style="color:var(--warn)">${falt.length}</b><span>Sem resposta</span></div></div>
     ${falt.length?`<div class="card stack" style="gap:8px"><b>Itens sem resposta</b>${falt.map(o=>`<button class="btn ghost" style="text-align:left" data-act="goto" data-p="${o.ix}">Seq ${h(o.it.seq)} · ${h(o.it.atv)}</button>`).join('')}</div>`:''}
@@ -504,7 +504,7 @@ function vReg(){
   const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
   const c=CAT[insp.cat], reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok');
   window.__sugR={};
-  let html=top(`Registro de tráfego · <b>MHC80-${h(insp.mhc)}</b>`,true)+`<div class="stack">
+  let html=topBar(`Registro de tráfego · <b>MHC80-${h(insp.mhc)}</b>`,true)+`<div class="stack">
    <p class="muted" style="margin:0">${c.nome} · ${fmt(insp.inicio)}. Tudo salva sozinho enquanto você digita. Pode sair e voltar depois.</p>`;
   if(!reg.length) html+=`<p>Nenhum item Não Ok nesta inspeção.</p>`;
   reg.forEach(i=>{ const a=insp.ans[i.key]; const sg=learned(insp,i); window.__sugR[i.key]=sg; const k=i.key;
@@ -528,7 +528,7 @@ function vSheet(){
   const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
   const c=CAT[insp.cat], all=itemsOf(insp), st=stats(insp), sc=scoped(insp);
   const mant=(insp.mant||[]).filter(m=>m.nome||m.mat);
-  let html=top(`Folha · MHC80-${h(insp.mhc)} · <b>${c.nome}</b>`,true)+`<div class="stack">
+  let html=topBar(`Folha · MHC80-${h(insp.mhc)} · <b>${c.nome}</b>`,true)+`<div class="stack">
    <section class="card hdrgrid">
      <div><span>Local</span><b>Oficina: ${h(insp.oficina)||'—'}</b><br><b>Pátio: ${h(insp.patio)||'—'}</b></div>
      <div><span>Equipamento</span><b>MHC80: ${h(insp.mhc)}</b></div>
