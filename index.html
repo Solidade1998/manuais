@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1e2126">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Manuais">
+<title>Manuais</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ TELA INICIAL ============ -->
+<section id="home" class="screen active">
+  <header class="topbar">
+    <h1>Manuais</h1>
+    <button id="btnImport" class="btn-accent" aria-label="Adicionar PDFs">＋ PDF</button>
+    <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+  </header>
+  <div class="searchbox">
+    <span class="icon">🔍</span>
+    <input id="search" type="search" placeholder="Buscar em todos os manuais…" autocomplete="off" enterkeyhint="search">
+    <button id="searchClear" class="clear" hidden aria-label="Limpar">✕</button>
+  </div>
+  <nav id="chips" class="chips"></nav>
+  <div id="homeBody" class="body"></div>
+</section>
+
+<!-- ============ SUMÁRIO DO MANUAL ============ -->
+<section id="manual" class="screen">
+  <header class="topbar">
+    <button class="back" data-back aria-label="Voltar">‹</button>
+    <h2 id="manualTitle" class="title"></h2>
+    <button id="btnOpenPdf" class="btn-ghost">Abrir</button>
+  </header>
+  <div class="searchbox">
+    <span class="icon">🔍</span>
+    <input id="manualSearch" type="search" placeholder="Buscar neste manual…" autocomplete="off" enterkeyhint="search">
+    <button id="manualSearchClear" class="clear" hidden aria-label="Limpar">✕</button>
+  </div>
+  <div id="manualBody" class="body"></div>
+</section>
+
+<!-- ============ LEITOR ============ -->
+<section id="viewer" class="screen">
+  <header class="topbar viewer-bar">
+    <button class="back" data-back aria-label="Voltar">‹</button>
+    <div class="vtitle">
+      <div id="viewerTitle" class="title"></div>
+      <div id="viewerPage" class="sub"></div>
+    </div>
+    <button id="btnMark" class="btn-ghost" aria-label="Salvar página">☆</button>
+  </header>
+  <div id="hitBar" class="hitbar" hidden>
+    <span id="hitText"></span>
+    <button id="hitPrev">▲</button><button id="hitNext">▼</button><button id="hitClose">✕</button>
+  </div>
+  <div id="pages" class="pages"><div id="pagesInner" class="pages-inner"></div></div>
+  <div class="zoombar">
+    <button id="zoomOut">－</button>
+    <button id="zoomFit">Ajustar</button>
+    <button id="zoomIn">＋</button>
+    <button id="goPage">Pág.</button>
+  </div>
+</section>
+
+<!-- ============ DIÁLOGOS ============ -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-card" id="sheetCard"></div>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
