@@ -426,7 +426,7 @@ function vHome(){
   return topBar('Checklist <b>MHC80</b>').replace('<div class="ttl">','<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a><div class="ttl">') + `<div class="stack">
   <section class="ask">
     <label for="mhcIn">Qual MHC você está?</label>
-    <div class="mhcin"><span>MHC80-</span><input id="mhcIn" inputmode="numeric" maxlength="3" placeholder="04" autocomplete="off"><button data-act="goMhc">Abrir</button></div>
+    <div class="mhcin"><span>MHC80-</span><input id="mhcIn" inputmode="numeric" maxlength="3" autocomplete="off"><button data-act="goMhc">Abrir</button></div>
     ${recent.length?`<div class="stack" style="margin-top:14px;gap:6px"><span class="small muted">Já inspecionados</span><div class="chips">${recent.map(m=>`<button class="chip" data-act="openMhc" data-m="${h(m)}">MHC80-${h(m)}</button>`).join('')}</div></div>`:''}
   </section>
   ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
