@@ -524,7 +524,7 @@ function vWiz(){
        <button class="btn ghost full" data-act="gateLater">Deixar em aberto</button></div></div>`;
   const lig=it.cond===LIG;
   let html=topBar(ttl,true)+`<div class="stack">
-   <div class="prog"><span>${V.pos+1} de ${items.length}</span>${bar(st)}</div>
+   ${V.editOne?`<div class="card small" style="border-left:6px solid var(--accent)"><b>Editando um item do checklist finalizado.</b> Escolha a resposta certa; depois você volta para a folha.</div>`:`<div class="prog"><span>${V.pos+1} de ${items.length}</span>${bar(st)}</div>`}
    <div class="cond ${lig?'lig':''}">${lig?'⚠ ':''}${h(it.cond)}</div>
    <article class="task">
      <div class="hd"><div class="sq">${h(it.seq)}</div><div><div class="meta">${h(it.sis)} · ${h(it.sub)}</div><div class="atv">${h(it.atv)}</div></div></div>
@@ -536,6 +536,7 @@ function vWiz(){
      ${['ok','nok','na'].map(r=>`<button class="ans ${r} ${a.r===r?'sel':''}" data-act="ans" data-r="${r}"><span class="bx">${a.r===r?'✕':''}</span>${RLBL[r]}</button>`).join('')}
    </div>`;
   if(a.r==='nok') html+=`<p class="small" style="margin:0;color:var(--nok);font-weight:600">Marcado como Não Ok. A falha você descreve no registro de tráfego, no final.</p>`;
+  if(V.editOne) return html+'</div>';
   html+=`</div><nav class="nav"><div class="in">
     <button class="btn ghost" data-act="prev" ${V.pos===0?'disabled':''}>‹ Anterior</button>
     <button class="btn ghost" data-act="sheet" data-id="${insp.id}">Folha</button>
@@ -600,7 +601,7 @@ function vSheet(){
      <div style="grid-column:1/-1"><span>Banco de assinaturas · Mantenedores</span>${mant.length?mant.map(m=>`<b>${h(m.nome)} / ${h(m.mat)} / ${h(m.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
    </section>
    <div class="tally"><div><b>${st.ok}</b><span>Ok</span></div><div><b style="color:var(--nok)">${st.nok}</b><span>Não Ok</span></div><div><b>${st.na}</b><span>N/A</span></div><div><b style="color:var(--warn)">${st.tot-st.done}</b><span>Sem resposta</span></div></div>
-   <p class="small muted" style="margin:0">${ro?'Somente leitura: checklist de outra pessoa.':'Toque numa linha para corrigir a resposta.'}</p>`;
+   <p class="small muted" style="margin:0">${ro?'Somente leitura: checklist de outra pessoa.':''+(insp.fim?'Checklist finalizado: toque numa linha para editar a resposta.':'Toque numa linha para corrigir a resposta.')+(insp.editado?' Editado em '+fmt(insp.editado)+'.':'')}</p>`;
   c.conds.forEach((cd,ci)=>{
     const rows=all.filter(i=>i.ci===ci);
     html+=`<h3>Condição: ${h(cd.c)}</h3><div class="tblwrap"><table><thead><tr><th>Seq</th><th>Atividade</th><th>Resultado encontrado</th><th>Esc.</th></tr></thead><tbody>`+
@@ -678,6 +679,17 @@ function vBrowse(){
       <span class="small muted">${ESC[x.e]||''} · início ${fmtH(x.i)}${x.f?' · fim '+fmtH(x.f):' · em andamento'}${x.falta?' · registro pendente':''}</span></button>`; });
   return html+'</div>';
 }
+function vEditAsk(){
+  if(V.v!=='sheet'||V.editAsk==null) return '';
+  const insp=curInsp(); const it=insp&&scoped(insp)[V.editAsk]; if(!it) return '';
+  const a=insp.ans[it.key]||{};
+  return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="edT"><div class="card stack">
+   <span class="pill p-open" style="align-self:flex-start">Seq ${h(it.seq)} · hoje: ${a.r?RLBL[a.r]:'sem resposta'}</span>
+   <h3 id="edT">Deseja editar este item?</h3>
+   <p class="small muted" style="margin:0">${h(it.atv)}</p>
+   <button class="btn y full" data-act="editYes">Sim, editar</button>
+   <button class="btn ghost full" data-act="editNo">Cancelar</button></div></div>`;
+}
 function vConfirm(){
   if(V.confirmR){ const i=TEAM.insp||{};
     return `<div class="modal" role="dialog" aria-modal="true"><div class="card stack"><h3>Apagar checklist da equipe?</h3>
@@ -718,7 +730,7 @@ function render(){
     case 'browse': html=vBrowse(); break;
     default: html=vHome();
   }
-  $app.innerHTML=html+vConfirm()+vAsk();
+  $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk();
 }
 function softRender(){
   const ae=document.activeElement;
@@ -736,6 +748,7 @@ function goMhc(){
   go({v:'mhc',mhc:m});
 }
 function back(){
+  if((V.v==='wiz'&&V.editOne)||(V.v==='reg'&&V.retSheet)) return go(V.retSheet);
   if(V.v==='mhc') go({v:'home'});
   else if(V.v==='cat'){ draft=null; go({v:'mhc',mhc:V.mhc}); }
   else if(V.back) go(V.back);
@@ -773,21 +786,28 @@ document.addEventListener('click',e=>{
   }
   if(act==='sheet') return go({v:'sheet',id:b.dataset.id});
   if(act==='reg') return go({v:'reg',id:b.dataset.id});
-  if(act==='askNo'){ V.ask=null; V.pos++; render(); window.scrollTo(0,0); return; }
-  if(act==='askYes'){ const k=V.ask; go({v:'reg',id:V.id,only:k,ret:V.pos+1});
+  if(act==='askNo'){ V.ask=null; if(V.editOne){ toast('Resposta corrigida'); return go(V.retSheet); } V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='askYes'){ const k=V.ask; go({v:'reg',id:V.id,only:k,ret:V.pos+1,retSheet:V.editOne?V.retSheet:null});
     const f=document.getElementById('f'+k+'a'); if(f) f.focus(); return; }
-  if(act==='regBack') return go({v:'wiz',id:V.id,pos:V.ret});
+  if(act==='regBack') return V.retSheet? go(V.retSheet) : go({v:'wiz',id:V.id,pos:V.ret});
   if(act==='sugR'){
     const s=((window.__sugR||{})[b.dataset.k]||[])[+b.dataset.i]; if(!s) return;
     const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
     a.falha=s.f; a.acao=s.a; a.mat=s.m; touch(insp);
     const y=window.scrollY; render(); window.scrollTo(0,y); return;
   }
-  if(act==='goto'){ const id=V.id; return go({v:'wiz',id,pos:+b.dataset.p}); }
+  if(act==='goto'){ const id=V.id, i=S.insps[id];
+    // checklist já finalizado: pergunta antes de editar e volta para a folha depois
+    if(V.v==='sheet'&&i&&i.fim){ V.editAsk=+b.dataset.p; return render(); }
+    return go({v:'wiz',id,pos:+b.dataset.p}); }
+  if(act==='editNo'){ V.editAsk=null; return render(); }
+  if(act==='editYes'){ const ret={v:'sheet',id:V.id,back:V.back}; return go({v:'wiz',id:V.id,pos:V.editAsk,editOne:true,retSheet:ret}); }
   if(act==='ans'){
     const insp=curInsp(), it=scoped(insp)[V.pos], r=b.dataset.r;
     const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; touch(insp);
+    if(V.editOne){ insp.editado=Date.now(); touch(insp); }
     if(r==='nok'){ V.ask=it.key; render(); return; }
+    if(V.editOne){ toast('Resposta corrigida'); return go(V.retSheet); }
     V.pos++; render(); window.scrollTo(0,0);
     return;
   }

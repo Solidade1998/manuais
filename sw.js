@@ -1,8 +1,8 @@
 // Guarda o app no celular para funcionar sem internet.
 // Ao mudar qualquer arquivo do app, aumente a versão abaixo.
-const VERSION = 'manuais-v3.9.1';
+const VERSION = 'manuais-v3.10.0';
 const CORE = [
-  './', 'index.html', 'checklist', 'style.css', 'app.js', 'manifest.webmanifest',
+  './', 'index.html', 'checklist', 'dicas', 'style.css', 'app.js', 'manifest.webmanifest',
   'lib/pdf.min.mjs', 'lib/pdf.worker.min.mjs',
   'lib/wasm/openjpeg.wasm', 'lib/wasm/openjpeg_nowasm_fallback.js',
   'lib/wasm/jbig2.wasm', 'lib/wasm/jbig2_nowasm_fallback.js', 'lib/wasm/qcms_bg.wasm',

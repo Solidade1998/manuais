@@ -173,6 +173,50 @@ export async function onRequest(context) {
       return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, no-store' } });
     }
 
+    // ---------------- dicas de procedimentos (fase de teste: só o admin) ----------------
+    if (path[0] === 'tips') {
+      if (!who.admin && !who.entry?.tips) return fail('A aba Dicas ainda está em teste.', 403);
+      if (!env.CK) return fail('Servidor sem o banco de dicas (CK).', 500);
+      const store = env.CK.get(env.CK.idFromName('dicas'));
+      const sid = v => String(v || '').replace(/[^a-z0-9-]/gi, '').slice(0, 60);
+      const txt = (v, n) => String(v || '').slice(0, n);
+      if (method === 'GET' && path.length === 1) return json({ tips: await store.tipList() });
+      if (method === 'GET' && path[1] === 'photo' && path[2]) {
+        const ph = await store.photoGet(sid(path[2]));
+        if (!ph) return fail('Foto não encontrada', 404);
+        return new Response(ph.bytes, { headers: { 'content-type': ph.mime, 'cache-control': 'private, max-age=31536000, immutable' } });
+      }
+      if (method === 'PUT' && path[1] === 'photo') {
+        const pid = sid(url.searchParams.get('id'));
+        const buf = await request.arrayBuffer();
+        if (!pid || !buf.byteLength) return fail('Foto vazia.');
+        if (buf.byteLength > 1800000) return fail('Foto grande demais (máx. 1,8 MB).', 413);
+        await store.photoPut(pid, (request.headers.get('content-type') || 'image/jpeg').slice(0, 40), buf);
+        return json({ ok: true });
+      }
+      const body = await request.json().catch(() => ({}));
+      const id = sid(body.id);
+      if (path[1] === 'save' && method === 'POST') {
+        if (!id || !txt(body.titulo, 1).trim()) return fail('Dê um título para a dica.');
+        const t = await store.tipSave({ id, titulo: txt(body.titulo, 140), maq: txt(body.maq, 40), sis: txt(body.sis, 30), tipo: txt(body.tipo, 20),
+          texto: txt(body.texto, 20000), fotos: (body.fotos || []).map(sid).filter(x => x.startsWith(id + '-')).slice(0, 30), by: who.name });
+        return json({ tip: t });
+      }
+      if (path[1] === 'comment' && method === 'POST') {
+        const c = { id: sid(body.cid) || String(Date.now()), by: who.name, at: Date.now(), texto: txt(body.texto, 5000),
+          fotos: (body.fotos || []).map(sid).filter(x => x.startsWith(id + '-')).slice(0, 10) };
+        if (!c.texto.trim() && !c.fotos.length) return fail('Escreva algo ou mande uma foto.');
+        const t = await store.tipComment(id, c);
+        return t ? json({ tip: t }) : fail('Dica não encontrada.', 404);
+      }
+      if (path[1] === 'uncomment' && method === 'POST') {
+        const t = await store.tipUncomment(id, sid(body.cid));
+        return t ? json({ tip: t }) : fail('Dica não encontrada.', 404);
+      }
+      if (path[1] === 'delete' && method === 'POST') { await store.tipDel(id); return json({ ok: true }); }
+      return fail('Rota desconhecida', 404);
+    }
+
     // ---------------- checklists (cada pessoa envia os seus) ----------------
     //  ck:<CÓDIGO>:<id>  inspeção completa; o resumo vai no metadata para a lista do admin
     if (path[0] === 'ck' && path[1] === 'save' && method === 'POST') {
