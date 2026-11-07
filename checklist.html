@@ -247,7 +247,16 @@ const CATS = [
   ]}
  ]}
 ];
-CATS.push({ id:'ele', nome:'Elétrico', doc:'Sistema Elétrico', esc:['S','M'], conds:[ { c:LIG, itens:[] } ] }); // itens: aguardando as fotos das páginas
+/* Elétrico: uma folha só (motor ligado), sempre todos os itens. Item 8 (controle remoto) removido: não se aplica. */
+CATS.push({ id:'ele', nome:'Elétrico', doc:'Sistema Elétrico', esc:['U'], conds:[ { c:LIG, itens:[
+  ...SEG3('Bloqueio no Equipamento aplicado. Bloqueio da Chave EC da Locomotiva aplicado.'),
+  ['4','Elétrico','Ar condicionado','Verificar funcionamento do ar condicionado','Testar.','D'],
+  ['5','Elétrico','Sistema de emergência','Conferir funcionamento da parada de emergência','Acionar todos os botões de emergência e garantir que estão funcionando conforme procedimento.','D'],
+  ['6','Elétrico','Iluminação','Acionar todas as luzes de trabalho e conferir o funcionamento individual de cada uma','Garantir que todas as luzes acendam.','D'],
+  ['7','Elétrico','Faróis','Verificar que faróis e sinalização de trabalho dos módulos estejam funcionando corretamente','Garantir que toda a iluminação da máquina esteja funcionando.','S'],
+  ['9','Elétrico','Controle a cabo','Verificar o funcionamento de todos os botões do controle a cabo','Garantir funcionalidade de todos os comandos do controle.','S'],
+  ['10','Elétrico','Baterias','Verificar tensão das baterias','Garantir funcionalidade de todos os comandos do controle.','S']
+] } ] });
 /* Função do código: mec = mecânico, ele = eletricista, all = todos */
 const FUNC = (()=>{ try{ const a=JSON.parse(localStorage.getItem('manuais.auth')||'{}')||{}; return a.admin?'all':(a.func||'mec'); }catch(e){ return 'mec'; } })();
 const allowed = id => FUNC==='all' || (FUNC==='ele' ? id==='ele' : id!=='ele');
@@ -264,8 +273,8 @@ const SUG = {
  poste:[{f:'Poste de retenção danificado LE',a:'Troca do cabo',m:'242483-040-00'}],
  raspador:[{f:'Raspador danificado',a:'Troca do raspador',m:'241920 (1) un'}]
 };
-const ESC = {D:'Diário',S:'Semanal',M:'Mensal'};
-const LV = {D:1,S:2,M:3};
+const ESC = {D:'Diário',S:'Semanal',M:'Mensal',U:'Todos os itens'};
+const LV = {D:1,S:2,M:3,U:3};
 const RLBL = {ok:'Ok',nok:'Não Ok',na:'Não se aplica'};
 
 /* ===================== ESTADO ===================== */
@@ -452,7 +461,8 @@ function vCat(){
     const d=draft;
     html+=`<section class="card stack">
       <h3>Nova inspeção · ${c.nome}</h3>
-      <div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">Escopo a ser executado</span>
+      ${(c.esc||[]).length===1?`<span class="small muted">Folha única: ${scoped({cat:V.cat,escopo:d.escopo}).length} itens, sem escolher escopo.</span>`:''}
+      <div class="stack" style="gap:6px;${(c.esc||[]).length===1?'display:none':''}"><span class="small muted" style="font-weight:600">Escopo a ser executado</span>
         <div class="seg" role="group" aria-label="Escopo">${(c.esc||['D','S','M']).map(k=>`<button data-act="esc" data-v="${k}" class="${d.escopo===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
         <span class="small muted">${d.escopo==='D'?'Só itens diários.':d.escopo==='S'?'Itens diários e semanais.':'Todos os itens (diários, semanais e mensais).'} ${scoped({cat:V.cat,escopo:d.escopo,rota:d.rota}).length} itens.</span></div>
       ${twoRoutes(V.cat)?`<div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">Começar por qual rota?</span>
@@ -501,7 +511,7 @@ function vWiz(){
      <div class="hd"><div class="sq">${h(it.seq)}</div><div><div class="meta">${h(it.sis)} · ${h(it.sub)}</div><div class="atv">${h(it.atv)}</div></div></div>
      ${it.tag?`<div class="bd" style="padding-bottom:0"><div class="tagw">⚠ ${h(it.tag)}</div></div>`:''}
      <div class="bd"><span class="lbl">Resultado esperado</span><div>${h(it.esp)}</div>
-     <div class="row small muted" style="margin-top:4px"><span class="pill p-na">${ESC[it.esc]}</span></div></div>
+     ${(c.esc||[]).length>1?`<div class="row small muted" style="margin-top:4px"><span class="pill p-na">${ESC[it.esc]}</span></div>`:''}</div>
    </article>
    <div class="answers" role="group" aria-label="Resultado encontrado">
      ${['ok','nok','na'].map(r=>`<button class="ans ${r} ${a.r===r?'sel':''}" data-act="ans" data-r="${r}"><span class="bx">${a.r===r?'✕':''}</span>${RLBL[r]}</button>`).join('')}
