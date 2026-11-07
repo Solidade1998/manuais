@@ -346,10 +346,16 @@ function normMhc(s){ const d=String(s||'').replace(/\D/g,''); if(!d) return ''; 
 
 function itemsOf(insp){
   const out=[]; CAT[insp.cat].conds.forEach((cd,ci)=>cd.itens.forEach((it,ii)=>{
-    out.push({key:ci+'-'+ii, ci, cond:cd.c, seq:it[0], sis:it[1], sub:it[2], atv:it[3], esp:it[4], esc:it[5], sug:it[6], tag:it[7], inScope:LV[it[5]]<=LV[insp.escopo]});
+    const rotaOut = insp.rota==='lig' && cd.c===DES; // rota desligada já feita em outra inspeção
+    out.push({key:ci+'-'+ii, ci, cond:cd.c, seq:it[0], sis:it[1], sub:it[2], atv:it[3], esp:it[4], esc:it[5], sug:it[6], tag:it[7], rotaOut, inScope:LV[it[5]]<=LV[insp.escopo] && !rotaOut});
   })); return out;
 }
-const scoped = insp => itemsOf(insp).filter(i=>i.inScope);
+/* rota: 'des' = normal (desligada e depois ligada) · 'lig' = só ligada (desligada já feita)
+         'ligdes' = começa pela ligada e a desligada fica em aberto para depois */
+const twoRoutes = cat => CAT[cat].conds.some(c=>c.c===DES) && CAT[cat].conds.some(c=>c.c===LIG);
+const scoped = insp => { const x=itemsOf(insp).filter(i=>i.inScope);
+  return insp.rota==='ligdes' ? x.filter(i=>i.cond===LIG).concat(x.filter(i=>i.cond!==LIG)) : x; };
+const ROTA_TXT = {des:'Desligada → Ligada', lig:'Só ligada (desligada já feita)', ligdes:'Ligada primeiro · desligada em aberto'};
 function stats(insp){
   const it=scoped(insp); let ok=0,nok=0,na=0,falta=0;
   it.forEach(i=>{ const a=insp.ans[i.key]; if(!a||!a.r) return; if(a.r==='ok')ok++; else if(a.r==='na')na++; else { nok++; if(!(a.falha||'').trim()) falta++; } });
@@ -410,6 +416,7 @@ function cardInsp(i){
   const st=stats(i), c=CAT[i.cat];
   return `<div class="card stack" style="gap:8px">
     <div class="row" style="justify-content:space-between"><b>MHC80-${h(i.mhc)} · ${h(c.nome)}</b><span class="pill p-open">${ESC[i.escopo]}</span></div>
+    ${i.rota==='ligdes'&&scoped(i).some(x=>x.cond===DES&&!(i.ans[x.key]||{}).r)?'<div class="small" style="color:var(--warn);font-weight:700">Rota desligada em aberto</div>':''}
     <div class="small muted">Início ${fmt(i.inicio)} · ${st.done} de ${st.tot} respondidos${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}${st.falta?` · <b style="color:var(--warn)">registro pendente</b>`:''}</div>
     ${bar(st)}
     <div class="row"><button class="btn y" data-act="wiz" data-id="${i.id}">Continuar</button><button class="btn alt" data-act="sheet" data-id="${i.id}">Ver folha</button></div>
@@ -447,7 +454,12 @@ function vCat(){
       <h3>Nova inspeção · ${c.nome}</h3>
       <div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">Escopo a ser executado</span>
         <div class="seg" role="group" aria-label="Escopo">${(c.esc||['D','S','M']).map(k=>`<button data-act="esc" data-v="${k}" class="${d.escopo===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
-        <span class="small muted">${d.escopo==='D'?'Só itens diários.':d.escopo==='S'?'Itens diários e semanais.':'Todos os itens (diários, semanais e mensais).'} ${scoped({cat:V.cat,escopo:d.escopo}).length} itens.</span></div>
+        <span class="small muted">${d.escopo==='D'?'Só itens diários.':d.escopo==='S'?'Itens diários e semanais.':'Todos os itens (diários, semanais e mensais).'} ${scoped({cat:V.cat,escopo:d.escopo,rota:d.rota}).length} itens.</span></div>
+      ${twoRoutes(V.cat)?`<div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">Começar por qual rota?</span>
+        <div class="seg" role="group" aria-label="Rota"><button data-act="rota" data-v="des" class="${d.rota==='des'?'on':''}">Rota desligada</button><button data-act="rota" data-v="ligsel" class="${d.rota!=='des'?'on':''}">Rota ligada</button></div>
+        ${d.rota!=='des'?`<span class="small" style="font-weight:700">A rota desligada já foi feita?</span>
+        <div class="seg" role="group" aria-label="Rota desligada já feita"><button data-act="rota" data-v="lig" class="${d.rota==='lig'?'on':''}">Sim</button><button data-act="rota" data-v="ligdes" class="${d.rota==='ligdes'?'on':''}">Não</button></div>
+        <span class="small muted">${d.rota==='lig'?'Só os itens da rota ligada entram nesta inspeção.':d.rota==='ligdes'?'Começa pela ligada. A rota desligada fica em aberto para fazer depois.':'Escolha Sim ou Não.'}</span>`:`<span class="small muted">Fluxo normal: rota desligada e depois a ligada.</span>`}</div>`:''}
       <div class="row"><div class="fld"><label for="d-of">Oficina</label><input id="d-of" data-d="oficina" value="${h(d.oficina)}" placeholder="GIU"></div>
         <div class="fld"><label for="d-pa">Pátio</label><input id="d-pa" data-d="patio" value="${h(d.patio)}" placeholder="P2114"></div></div>
       ${d.mant.map((m,ix)=>`<div class="row"><div class="fld" style="flex:2"><label for="m${ix}n">Mantenedor ${ix+1}${ix?' (opcional)':''}</label><input id="m${ix}n" data-m="${ix}" data-k="nome" value="${h(m.nome)}"></div>
@@ -474,6 +486,13 @@ function vWiz(){
   const ttl=`MHC80-${h(insp.mhc)} · <b>${c.nome}</b>`;
   if(V.pos>=items.length) return vSummary(insp,items,st,ttl);
   const it=items[V.pos], a=insp.ans[it.key]||{};
+  if(insp.rota==='ligdes' && it.cond===DES && V.pos>0 && items[V.pos-1].cond===LIG && !V.gate)
+    return topBar(ttl,true)+`<div class="stack">
+     <div class="cond lig">Rota ligada concluída</div>
+     <div class="card stack"><h3>Fazer a rota desligada agora?</h3>
+       <p style="margin:0">Faltam ${items.length-V.pos} itens da rota desligada. Se deixar para depois, esta inspeção fica <b>em aberto</b> e você continua de onde parou.</p>
+       <button class="btn y full" data-act="gateGo">Fazer a rota desligada agora</button>
+       <button class="btn ghost full" data-act="gateLater">Deixar em aberto</button></div></div>`;
   const lig=it.cond===LIG;
   let html=topBar(ttl,true)+`<div class="stack">
    <div class="prog"><span>${V.pos+1} de ${items.length}</span>${bar(st)}</div>
@@ -546,6 +565,7 @@ function vSheet(){
      <div><span>Início</span><b>${fmtD(insp.inicio)} às ${fmtH(insp.inicio)}</b></div>
      <div><span>Fim</span><b>${insp.fim?fmtD(insp.fim)+' às '+fmtH(insp.fim):'em andamento'}</b></div>
      <div><span>Escopo a ser executado</span><b>(X) ${ESC[insp.escopo]}</b></div>
+     ${insp.rota&&insp.rota!=='des'?`<div style="grid-column:1/-1"><span>Rota</span><b>${ROTA_TXT[insp.rota]}</b></div>`:''}
      <div><span>Visita · Duração</span><b>N/A · Não medido</b></div>
      ${ro?`<div style="grid-column:1/-1"><span>Enviado por</span><b>${h(insp.by)||'—'}</b></div>`:''}
      <div style="grid-column:1/-1"><span>Banco de assinaturas · Mantenedores</span>${mant.length?mant.map(m=>`<b>${h(m.nome)} / ${h(m.mat)} / ${h(m.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
@@ -556,7 +576,7 @@ function vSheet(){
     const rows=all.filter(i=>i.ci===ci);
     html+=`<h3>Condição: ${h(cd.c)}</h3><div class="tblwrap"><table><thead><tr><th>Seq</th><th>Atividade</th><th>Resultado encontrado</th><th>Esc.</th></tr></thead><tbody>`+
       rows.map(i=>{ const a=insp.ans[i.key]||{}; const pos=sc.findIndex(x=>x.key===i.key);
-        if(!i.inScope) return `<tr class="out"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}</td><td class="small">fora do escopo</td><td class="esc">${i.esc}</td></tr>`;
+        if(!i.inScope) return `<tr class="out"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}</td><td class="small">${i.rotaOut?'rota feita em outra inspeção':'fora do escopo'}</td><td class="esc">${i.esc}</td></tr>`;
         return `<tr ${ro?'':`class="click" data-act="goto" data-p="${pos}"`}><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}${a.r==='nok'&&!(a.falha||'').trim()?'<div class="pend">Falta descrever a falha</div>':''}</td><td>${a.r?rbox(a.r):'<span class="pend">Sem resposta</span>'}</td><td class="esc">${i.esc}</td></tr>`;
       }).join('')+`</tbody></table></div>`;
   });
@@ -698,15 +718,17 @@ document.addEventListener('click',e=>{
   if(act==='openMhc') return go({v:'mhc',mhc:b.dataset.m});
   if(act==='openCat'){ draft=null; return go({v:'cat',mhc:V.mhc,cat:b.dataset.c}); }
   if(act==='newDraft'){
-    draft={escopo:(CAT[V.cat].esc||['D'])[0],oficina:S.prof.oficina||'',patio:S.prof.patio||'',mant:JSON.parse(JSON.stringify(S.prof.mant||[{},{}]))};
+    draft={rota:'des',escopo:(CAT[V.cat].esc||['D'])[0],oficina:S.prof.oficina||'',patio:S.prof.patio||'',mant:JSON.parse(JSON.stringify(S.prof.mant||[{},{}]))};
     while(draft.mant.length<2) draft.mant.push({nome:'',mat:'',turma:''});
     return render();
   }
   if(act==='cancelDraft'){ draft=null; return render(); }
   if(act==='esc'){ draft.escopo=b.dataset.v; return render(); }
+  if(act==='rota'){ const v=b.dataset.v; draft.rota = v==='ligsel' ? (draft.rota==='des'?'ask':draft.rota) : v; return render(); }
   if(act==='start'){
+    if(draft.rota==='ask'){ toast('Responda se a rota desligada já foi feita'); return; }
     const id=newId();
-    const insp={id,mhc:V.mhc,cat:V.cat,escopo:draft.escopo,oficina:draft.oficina.trim(),patio:draft.patio.trim(),mant:draft.mant.map(m=>({nome:(m.nome||'').trim(),mat:(m.mat||'').trim(),turma:(m.turma||'').trim()})),inicio:Date.now(),fim:0,ans:{},cp:{}};
+    const insp={id,mhc:V.mhc,cat:V.cat,escopo:draft.escopo,rota:twoRoutes(V.cat)?draft.rota:'des',oficina:draft.oficina.trim(),patio:draft.patio.trim(),mant:draft.mant.map(m=>({nome:(m.nome||'').trim(),mat:(m.mat||'').trim(),turma:(m.turma||'').trim()})),inicio:Date.now(),fim:0,ans:{},cp:{}};
     S.insps[id]=insp; S.prof.oficina=insp.oficina; S.prof.patio=insp.patio; S.prof.mant=insp.mant; touchProf(); touch(insp);
     draft=null; return go({v:'wiz',id,pos:0});
   }
@@ -743,6 +765,8 @@ document.addEventListener('click',e=>{
     return;
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='gateGo'){ V.gate=true; render(); window.scrollTo(0,0); return; }
+  if(act==='gateLater'){ const i=curInsp(); toast('Rota desligada em aberto'); return go({v:'mhc',mhc:i.mhc,from:i.id}); }
   if(act==='prev'){ V.pos=Math.max(0,V.pos-1); render(); window.scrollTo(0,0); return; }
   if(act==='finish'){ const i=curInsp(); i.fim=Date.now(); touch(i); schedule(0); toast('Inspeção finalizada'); return go({v:'sheet',id:i.id}); }
   if(act==='cp'){ const i=curInsp(); i.cp=i.cp||{}; i.cp[b.dataset.k]=!i.cp[b.dataset.k]; touch(i); return render(); }

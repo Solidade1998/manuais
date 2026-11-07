@@ -784,6 +784,14 @@ async function renderSearch(box, q, onlyId) {
   const { topics, pages, ts } = res;
   const pending = (onlyId ? [docById(onlyId)] : visDocs()).filter(d => !d.textDone);
   if (!onlyId && S.brand !== 'Todas') box.prepend(el('div', { class: 'muted small', style: 'margin:6px 2px' }, `Buscando só em ${S.brand}. Para buscar em tudo, toque em “Todas” lá em cima.`));
+  // manuais cujo nome, grupo, marca ou arquivo batem com a busca (ex.: "preventiva c75")
+  const hay = d => norm([d.name, d.group, d.brand || brandOf(d), d.file || ''].join(' '));
+  const byName = onlyId ? [] : visDocs().filter(d => ts.every(t => hay(d).includes(t)));
+  if (byName.length) {
+    box.append(el('h3', { class: 'sec' }, `Manuais (${byName.length})`));
+    for (const d of byName) box.append(el('button', { class: 'row', onclick: () => go({ s: 'manual', id: d.id }) },
+      el('div', { class: 'main' }, el('div', { class: 't', html: hlTitle(d.name, ts) }), el('div', { class: 's' }, `${brandOf(d)} · ${d.group}`)), el('div', { class: 'pg' }, '›')));
+  }
   if (topics.length) {
     box.append(el('h3', { class: 'sec' }, `Tópicos do sumário (${topics.length})`));
     for (const { d, f } of topics.slice(0, 60)) {
@@ -811,13 +819,13 @@ async function renderSearch(box, q, onlyId) {
     };
     box.append(more); more.onclick = addSome; addSome();
   }
-  const cl = onlyId ? [] : S.cloud.filter(inBrand).filter(d => ts.every(t => norm(d.name + ' ' + d.group).includes(t)));
+  const cl = onlyId ? [] : S.cloud.filter(inBrand).filter(d => ts.every(t => hay(d).includes(t)));
   if (cl.length) {
     box.append(el('h3', { class: 'sec' }, `Na nuvem (${cl.length}) — abre com internet`));
     for (const d of cl) box.append(el('button', { class: 'row', onclick: () => openCloud(d, () => go({ s: 'manual', id: d.id })) },
       el('div', { class: 'main' }, el('div', { class: 't' }, '☁ ' + d.name), el('div', { class: 's' }, `${d.brand ? d.brand + ' · ' : ''}${d.group} · ${fmtMB(d.size)}`)), el('div', { class: 'pg' }, '›')));
   }
-  if (!topics.length && !pages.length && !cl.length) {
+  if (!byName.length && !topics.length && !pages.length && !cl.length) {
     box.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, '🔎'), `Nada encontrado para “${q}”.`));
   }
   if (pending.length) box.append(el('div', { class: 'note' }, `Ainda preparando a busca dentro do texto de: ${pending.map(d => d.name).join(', ')}. Os resultados vão aparecer quando terminar.`));
