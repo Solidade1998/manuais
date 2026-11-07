@@ -98,6 +98,7 @@ h3{font-size:19px}
 .ans .bx{width:28px;height:28px;border:2px solid currentColor;border-radius:6px;display:grid;place-items:center;font-size:18px;flex:none}
 .ans.ok{color:var(--ok);border-color:var(--ok)}.ans.nok{color:var(--nok);border-color:var(--nok)}.ans.na{color:var(--na);border-color:#A9AFB5}
 .ans.sel.ok{background:var(--ok-soft)}.ans.sel.nok{background:var(--nok-soft)}.ans.sel.na{background:var(--na-soft)}
+.cm{border-left:3px solid var(--line);padding:4px 0 4px 12px;display:flex;flex-direction:column;gap:4px}
 .tagw{background:var(--accent-soft);border:2px solid var(--accent);border-radius:8px;padding:8px 10px;font-weight:700;font-size:15px}
 .regcard .sq{font-family:var(--display);font-weight:700;font-size:24px;background:var(--nok);color:#fff;border-radius:6px;padding:2px 10px;white-space:nowrap}
 .nokbox{border:2px solid var(--nok);background:#fff;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
@@ -415,6 +416,71 @@ function bar(st){
 let toastT;
 function toast(msg){ let el=document.querySelector('.toast'); if(!el){ el=document.createElement('div'); el.className='toast'; el.setAttribute('role','status'); document.body.appendChild(el);} el.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>el.remove(),2600); }
 
+/* ===================== ANOTAÇÕES DA ABA DICAS NO CHECKLIST =====================
+   Dicas cujo título/máquina citam o MHC (ex.: "MHC12", "MHC80-12", "Mhc 14") aparecem
+   no checklist daquele MHC. Cada linha ou comentário vira um trecho que pode ser
+   aplicado num item: marca Não Ok e coloca o texto como falha no registro de tráfego.
+   Se a linha começa com um número ("5 - vazamento", "seq 13 TF: folga"), o item é sugerido. */
+let NOTES=(()=>{ try{ return JSON.parse(localStorage.getItem('dicas.cache.v1')||'[]'); }catch(e){ return []; } })();
+let notesAt=0;
+async function loadNotes(force){
+  if(!AUTH.token||(!force&&Date.now()-notesAt<60000)) return;
+  notesAt=Date.now();
+  try{ const r=await fetch('api/tips',{headers:{authorization:'Bearer '+AUTH.token},cache:'no-store'}); if(!r.ok) return;
+    const d=await r.json(); NOTES=d.tips||[]; try{ localStorage.setItem('dicas.cache.v1',JSON.stringify(NOTES)); }catch(e){}
+    if(V.v==='wiz'||V.v==='sheet') softRender(); }catch(e){}
+}
+function tipMhc(t){
+  const s=String((t.maq||'')+' '+(t.titulo||'')).toLowerCase();
+  let m=s.match(/mhc\s*-?\s*80\s*[-–\/ ]\s*(\d{1,3})/); if(m) return +m[1];
+  for(const x of s.matchAll(/mhc\s*-?\s*(\d{1,3})/g)) if(+x[1]!==80) return +x[1];
+  return null;
+}
+const notesFor=mhc=>NOTES.filter(t=>tipMhc(t)===+mhc);
+function segments(t){
+  const out=[]; const push=(txt,by)=>{ const loose=[];
+    String(txt||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).forEach(l=>{
+      const m=l.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
+      if(m) out.push({seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),txt:m[3].trim(),by}); else loose.push(l); });
+    if(loose.length) out.push({seq:'',txt:loose.join(' '),by}); };
+  push(t.texto,t.by); (t.comments||[]).forEach(c=>push(c.texto,c.by));
+  if(!out.length&&t.titulo) out.push({seq:'',txt:t.titulo,by:t.by});
+  return out;
+}
+function suggestKey(items,seq){
+  if(!seq) return '';
+  const exact=items.filter(i=>i.seq.toUpperCase()===seq.toUpperCase());
+  const pool=exact.length?exact:items.filter(i=>i.seq.split(' ')[0]===seq.split(' ')[0]);
+  const lig=pool.find(i=>i.cond===LIG); // as anotações foram da rota ligada
+  return (lig||pool[0]||{}).key||'';
+}
+function vNotes(insp){
+  const ns=notesFor(insp.mhc); if(!ns.length) return '';
+  const done=insp.applied||{};
+  const open=!!V.notesOpen;
+  return `<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
+    <button class="row" style="border:0;background:none;padding:0;justify-content:space-between;width:100%;font-weight:700" data-act="notesToggle">
+      <span>📝 Anotações do MHC80-${h(insp.mhc)} (${ns.length})</span><span>${open?'▲':'▼'}</span></button>
+    ${open?ns.map(t=>{ const sg=segments(t), n=(done[t.id]||[]).length;
+      return `<div class="cm"><b>${h(t.titulo)}</b><span class="small muted">${h(t.by||'')}${n?` · <b style="color:var(--ok)">${n} de ${sg.length} aplicado${n>1?'s':''}</b>`:''}</span>
+        ${sg.map(x=>`<div class="small">${x.seq?`<b>Seq ${h(x.seq)}:</b> `:''}${h(x.txt)}</div>`).join('')}
+        <button class="btn alt" style="align-self:flex-start;min-height:38px;padding:6px 12px" data-act="applyOpen" data-id="${h(t.id)}">Aplicar no checklist</button></div>`; }).join(''):''}
+  </section>`;
+}
+function vApply(){
+  if(!V.apply) return '';
+  const insp=curInsp(), t=NOTES.find(x=>x.id===V.apply); if(!insp||!t) return '';
+  const items=scoped(insp), sg=segments(t), done=(insp.applied||{})[t.id]||[];
+  return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="apT"><div class="card stack" style="max-height:88vh;overflow:auto">
+    <h3 id="apT">Aplicar no checklist</h3>
+    <p class="small muted" style="margin:0">Escolha o item de cada trecho. Ele fica <b>Não Ok</b> e o texto vai como falha no registro de tráfego.</p>
+    ${sg.map((x,ix)=>{ const sug=suggestKey(items,x.seq); const ok=done.includes(ix);
+      return `<div class="cm" style="gap:8px"><div>${x.seq?`<b>Seq ${h(x.seq)}:</b> `:''}${h(x.txt)} <span class="small muted">· ${h(x.by||'')}</span></div>
+        <select id="ap${ix}" class="search" style="padding:10px">${sug?'':'<option value="">Escolha o item…</option>'}${items.map(i=>`<option value="${i.key}" ${i.key===sug?'selected':''}>Seq ${h(i.seq)} · ${h(i.cond===LIG?'ligado':'deslig.')} · ${h(i.atv.slice(0,60))}</option>`).join('')}</select>
+        ${ok?`<span class="small" style="color:var(--ok);font-weight:700">✓ Aplicado</span>`:`<button class="btn danger" style="align-self:flex-start" data-act="applySeg" data-i="${ix}">Aplicar como Não Ok</button>`}</div>`; }).join('')}
+    <button class="btn ghost full" data-act="applyClose">Fechar</button></div></div>`;
+}
+
 /* ===================== VIEWS ===================== */
 function topBar(title, back){
   return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:''}<div class="ttl">${title}</div><span id="sync" class="sync">${syncText()}</span></header>`;
@@ -525,6 +591,7 @@ function vWiz(){
   const lig=it.cond===LIG;
   let html=topBar(ttl,true)+`<div class="stack">
    ${V.editOne?`<div class="card small" style="border-left:6px solid var(--accent)"><b>Editando um item do checklist finalizado.</b> Escolha a resposta certa; depois você volta para a folha.</div>`:`<div class="prog"><span>${V.pos+1} de ${items.length}</span>${bar(st)}</div>`}
+   ${vNotes(insp)}
    <div class="cond ${lig?'lig':''}">${lig?'⚠ ':''}${h(it.cond)}</div>
    <article class="task">
      <div class="hd"><div class="sq">${h(it.seq)}</div><div><div class="meta">${h(it.sis)} · ${h(it.sub)}</div><div class="atv">${h(it.atv)}</div></div></div>
@@ -601,6 +668,7 @@ function vSheet(){
      <div style="grid-column:1/-1"><span>Banco de assinaturas · Mantenedores</span>${mant.length?mant.map(m=>`<b>${h(m.nome)} / ${h(m.mat)} / ${h(m.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
    </section>
    <div class="tally"><div><b>${st.ok}</b><span>Ok</span></div><div><b style="color:var(--nok)">${st.nok}</b><span>Não Ok</span></div><div><b>${st.na}</b><span>N/A</span></div><div><b style="color:var(--warn)">${st.tot-st.done}</b><span>Sem resposta</span></div></div>
+   ${ro?'':vNotes(insp)}
    <p class="small muted" style="margin:0">${ro?'Somente leitura: checklist de outra pessoa.':''+(insp.fim?'Checklist finalizado: toque numa linha para editar a resposta.':'Toque numa linha para corrigir a resposta.')+(insp.editado?' Editado em '+fmt(insp.editado)+'.':'')}</p>`;
   c.conds.forEach((cd,ci)=>{
     const rows=all.filter(i=>i.ci===ci);
@@ -730,7 +798,8 @@ function render(){
     case 'browse': html=vBrowse(); break;
     default: html=vHome();
   }
-  $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk();
+  $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply();
+  if(V.v==='wiz'||(V.v==='sheet'&&!V.ro)) loadNotes();
 }
 function softRender(){
   const ae=document.activeElement;
@@ -819,6 +888,22 @@ document.addEventListener('click',e=>{
     return;
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='notesToggle'){ V.notesOpen=!V.notesOpen; return render(); }
+  if(act==='applyOpen'){ V.apply=b.dataset.id; return render(); }
+  if(act==='applyClose'){ V.apply=null; return render(); }
+  if(act==='applySeg'){
+    const insp=curInsp(), t=NOTES.find(x=>x.id===V.apply), ix=+b.dataset.i, x=segments(t)[ix];
+    const key=(document.getElementById('ap'+ix)||{}).value;
+    if(!key){ toast('Escolha o item primeiro'); return; }
+    const it=scoped(insp).find(i=>i.key===key), a=insp.ans[key]||{};
+    const txt=x.txt.trim();
+    a.r='nok'; a.t=Date.now();
+    a.falha = a.falha&&!a.falha.includes(txt) ? a.falha+' / '+txt : (a.falha||txt);
+    insp.ans[key]=a;
+    insp.applied=insp.applied||{}; insp.applied[t.id]=[...new Set([...(insp.applied[t.id]||[]),ix])];
+    if(insp.fim) insp.editado=Date.now();
+    touch(insp); toast(`Seq ${it.seq} marcado Não Ok com a anotação`); return render();
+  }
   if(act==='gateGo'){ V.gate=true; render(); window.scrollTo(0,0); return; }
   if(act==='gateLater'){ const i=curInsp(); toast('Rota desligada em aberto'); return go({v:'mhc',mhc:i.mhc,from:i.id}); }
   if(act==='prev'){ V.pos=Math.max(0,V.pos-1); render(); window.scrollTo(0,0); return; }
