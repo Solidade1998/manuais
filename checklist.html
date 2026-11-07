@@ -317,11 +317,11 @@ let TEAM={list:null,err:'',insp:null};
 async function loadTeam(){
   TEAM.err=''; TEAM.list=null; render();
   try{ TEAM.list=(await api('admin/ck')).list; }catch(e){ TEAM.err=e.status?e.message:'Sem internet. Tente de novo com sinal.'; }
-  if(V.v==='team') render();
+  if(V.v==='browse') render();
 }
 async function openRemote(code,id){
   toast('Abrindo…');
-  try{ TEAM.insp=(await api('admin/ck/'+encodeURIComponent(code)+'/'+encodeURIComponent(id))).insp; go({v:'sheet',ro:true}); }
+  try{ TEAM.insp=(await api('admin/ck/'+encodeURIComponent(code)+'/'+encodeURIComponent(id))).insp; go({v:'sheet',ro:true,back:Object.assign({},V)}); }
   catch(e){ toast(e.status?e.message:'Sem internet'); }
 }
 
@@ -332,6 +332,10 @@ const p2=n=>String(n).padStart(2,'0');
 function fmt(t){ if(!t) return '—'; const d=new Date(t); return `${p2(d.getDate())}/${p2(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; }
 function fmtD(t){ return fmt(t).slice(0,8); }
 function fmtH(t){ return t? fmt(t).slice(9):'—'; }
+const WD=['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+function dayKey(t){ const d=new Date(t||0); return d.getFullYear()+'-'+p2(d.getMonth()+1)+'-'+p2(d.getDate()); }
+function dayLabel(k){ const [y,m,d]=k.split('-').map(Number); const dt=new Date(y,m-1,d); const t=dayKey(Date.now()), ontem=dayKey(Date.now()-864e5);
+  return (k===t?'Hoje · ':k===ontem?'Ontem · ':'')+WD[dt.getDay()]+', '+p2(d)+'/'+p2(m)+'/'+y; }
 function newId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 function normMhc(s){ const d=String(s||'').replace(/\D/g,''); if(!d) return ''; return d.length<2? d.padStart(2,'0'): d; }
 
@@ -387,6 +391,7 @@ function vHome(){
     ${recent.length?`<div class="stack" style="margin-top:14px;gap:6px"><span class="small muted">Já inspecionados</span><div class="chips">${recent.map(m=>`<button class="chip" data-act="openMhc" data-m="${h(m)}">MHC80-${h(m)}</button>`).join('')}</div></div>`:''}
   </section>
   ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
+  ${Object.keys(S.insps).length?`<button class="btn alt full" data-act="browse">Meus checklists por data</button>`:''}
   ${AUTH.admin?`<button class="btn full" data-act="team">Checklists da equipe (admin)</button>`:''}
   <section class="card stack" style="gap:8px"><b>Cópia de segurança</b>
     <span class="small muted">As inspeções ficam guardadas neste celular. Faça uma cópia de vez em quando, ou antes de trocar de celular ou limpar os dados do navegador.</span>
@@ -407,17 +412,23 @@ function cardInsp(i){
 }
 
 function vMhc(){
-  const m=V.mhc;
+  const m=V.mhc, today=dayKey(Date.now()), tpl=V.from&&S.insps[V.from];
   const cards=CATS.map(c=>{
-    const last=inspsFor(m,c.id)[0];
-    let info='<span class="small muted">Nenhuma inspeção ainda</span>', b='';
-    if(last){ const st=stats(last); b=bar(st);
-      info=`<div class="row" style="justify-content:space-between"><span class="small muted">${last.fim?'Última':'Em andamento'} · ${fmtD(last.inicio)} · ${ESC[last.escopo]}</span>${last.fim?(st.nok?`<span class="pill p-nok">${st.nok} Não Ok</span>`:`<span class="pill p-ok">Concluída</span>`):`<span class="pill p-open">${st.done}/${st.tot}</span>`}</div>`; }
-    const n=c.conds.reduce((s,cd)=>s+cd.itens.length,0);
-    return `<button class="catcard" data-act="openCat" data-c="${c.id}"><span class="nm">${c.nome}</span><span class="small muted">${c.conds.map(cd=>cd.c).join(' + ')} · ${n} itens</span>${info}${b}</button>`;
+    const all=inspsFor(m,c.id), hoje=all.filter(i=>dayKey(i.inicio)===today), last=all[0];
+    const feito=hoje.find(i=>i.fim), andamento=hoje.find(i=>!i.fim)||all.find(i=>!i.fim);
+    let status, info='', b='';
+    if(feito){ const st=stats(feito); status=`<span class="pill p-ok">Feito hoje</span>`; info=`<span class="small muted">${ESC[feito.escopo]} · ${fmtH(feito.inicio)}${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}</span>`; b=bar(st); }
+    else if(andamento){ const st=stats(andamento); status=`<span class="pill p-open">Em andamento ${st.done}/${st.tot}</span>`; info=`<span class="small muted">Início ${fmt(andamento.inicio)} · ${ESC[andamento.escopo]}</span>`; b=bar(st); }
+    else { status=`<span class="pill p-nok">Falta hoje</span>`; info=`<span class="small muted">${last?'Último: '+fmtD(last.inicio)+' · '+ESC[last.escopo]:'Nenhuma inspeção ainda'}</span>`; }
+    const quick=tpl&&!feito&&!andamento;
+    const act=andamento&&tpl?`data-act="wiz" data-id="${andamento.id}"`:quick?`data-act="quick" data-c="${c.id}"`:`data-act="openCat" data-c="${c.id}"`;
+    return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}${quick?`<span class="small" style="font-weight:700">Toque para começar agora ›</span>`:''}</button>`;
   }).join('');
-  return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">${cards}
-    <button class="catcard" disabled><span class="nm">Elétrico</span><span class="small muted">Em breve</span></button></div>`;
+  return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
+    ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
+    ${cards}
+    <button class="catcard" disabled><span class="nm">Elétrico</span><span class="small muted">Em breve</span></button>
+    <button class="btn ghost full" data-act="browse">Histórico por data</button></div>`;
 }
 
 function vCat(){
@@ -489,6 +500,7 @@ function vSummary(insp,items,st,ttl){
     ${st.nok?`<div class="card stack" style="gap:8px;border-left:6px solid var(--nok)"><b>Registro de solicitações de tráfego</b><span class="small muted">${st.nok} item(ns) Não Ok: Seq ${items.filter(i=>(insp.ans[i.key]||{}).r==='nok').map(i=>h(i.seq)).join(', ')}. ${nokSem.length?nokSem.length+' ainda sem falha descrita. Pode preencher agora ou depois.':'Tudo preenchido.'}</span><button class="btn y full" data-act="reg" data-id="${insp.id}">Preencher registro de tráfego</button></div>`:''}
     ${insp.fim?`<p class="muted">Fim registrado: ${fmt(insp.fim)}</p>`:`<button class="btn y full" data-act="finish">Finalizar inspeção (registra hora do fim)</button>`}
     <button class="btn alt full" data-act="sheet" data-id="${insp.id}">Ver folha para passar no papel</button>
+    <button class="btn full" data-act="others" data-id="${insp.id}">Abrir os outros checklists do MHC80-${h(insp.mhc)}</button>
   </div>`;
 }
 
@@ -550,7 +562,7 @@ function vSheet(){
     reg.map(i=>{ const a=insp.ans[i.key]; const cp=(insp.cp||{})[i.key];
       return `<tr class="${cp?'done':''}"><td class="seq">${h(i.seq)}</td><td>${h(a.falha)||'<span class="pend">preencher</span>'}${a.corr?'<div class="small" style="color:var(--ok);font-weight:700">(X) Corrigido</div>':''}</td><td>${h(a.acao)}</td><td>${h(a.mat)}</td><td>${h(a.os)}</td>
  <td><button class="tick ${cp?'on':''}" ${ro?'disabled':''} data-act="cp" data-k="${i.key}" aria-label="Marcar como passado para a folha">${cp?'✓':''}</button></td></tr>`; }).join('')+`</tbody></table></div>`;
-  html+=`<div class="row"><button class="btn y" data-act="copy">Copiar resumo em texto</button>${insp.fim||ro?'':`<button class="btn alt" data-act="wiz" data-id="${insp.id}">Continuar checklist</button>`}</div>
+  html+=`<div class="row"><button class="btn y" data-act="copy">Copiar resumo em texto</button>${insp.fim||ro?'':`<button class="btn alt" data-act="wiz" data-id="${insp.id}">Continuar checklist</button>`}${ro?'':`<button class="btn" data-act="others" data-id="${insp.id}">Outros checklists do MHC80-${h(insp.mhc)}</button>`}</div>
    ${V.copyText?`<textarea class="copy" readonly id="copyTxt">${h(V.copyText)}</textarea>`:''}
   </div>`;
   return html;
@@ -566,19 +578,49 @@ function vAsk(){
    <button class="btn danger full" data-act="askYes">Sim, comentar a falha</button>
    <button class="btn ghost full" data-act="askNo">Não, seguir o checklist</button></div></div>`;
 }
-function vTeam(){
-  let html=topBar('Checklists da <b>equipe</b>',true)+'<div class="stack">';
-  html+=`<div class="row" style="justify-content:space-between"><span class="small muted">Só o administrador vê esta tela.</span><button class="btn ghost" data-act="teamReload">Atualizar</button></div>`;
-  if(TEAM.err) return html+`<div class="card">${h(TEAM.err)}</div></div>`;
-  if(!TEAM.list) return html+'<p class="muted">Carregando…</p></div>';
-  if(!TEAM.list.length) return html+'<p class="muted">Ninguém enviou checklist ainda.</p></div>';
-  const by={}; TEAM.list.forEach(x=>{ (by[x.n||'Sem nome']=by[x.n||'Sem nome']||[]).push(x); });
-  Object.keys(by).sort((a,b)=>a.localeCompare(b,'pt')).forEach(n=>{
-    html+=`<h3>${h(n)} <span class="small muted">· ${by[n].length}</span></h3>`;
-    html+=by[n].map(x=>`<button class="catcard" data-act="openR" data-code="${h(x.code)}" data-id="${h(x.id)}">
-      <div class="row" style="justify-content:space-between;width:100%"><b>MHC80-${h(x.m)} · ${h((CAT[x.c]||{}).nome||x.c)}</b>${x.f?(x.nok?`<span class="pill p-nok">${x.nok} Não Ok</span>`:'<span class="pill p-ok">Concluída</span>'):`<span class="pill p-open">${(x.ok||0)+(x.nok||0)+(x.na||0)}/${x.tot||0}</span>`}</div>
-      <span class="small muted">${fmt(x.i)} · ${ESC[x.e]||''}${x.f?'':' · em andamento'}${x.falta?' · registro pendente':''}</span></button>`).join('');
-  });
+function entries(){
+  if(V.src==='team') return (TEAM.list||[]).map(x=>Object.assign({},x));
+  return Object.values(S.insps).map(i=>{ const st=stats(i); return {own:true,id:i.id,n:'',m:i.mhc,c:i.cat,e:i.escopo,i:i.inicio,f:i.fim,ok:st.ok,nok:st.nok,na:st.na,tot:st.tot,falta:st.falta}; });
+}
+function groupBy(arr,fn){ const g=new Map(); arr.forEach(x=>{ const k=fn(x); if(!g.has(k)) g.set(k,[]); g.get(k).push(x); }); return g; }
+function vBrowse(){
+  const team=V.src==='team';
+  const crumbs=[team?(V.p||'Equipe'):'Meus checklists', V.d&&dayLabel(V.d), V.m&&'MHC80-'+V.m].filter(Boolean).join(' › ');
+  let html=topBar(team?'Checklists da <b>equipe</b>':'Histórico por <b>data</b>',true)+'<div class="stack">';
+  html+=`<div class="row" style="justify-content:space-between"><span class="small muted">${h(crumbs)}</span>${team?'<button class="btn ghost" data-act="teamReload">Atualizar</button>':''}</div>`;
+  if(team&&TEAM.err) return html+`<div class="card">${h(TEAM.err)}</div></div>`;
+  if(team&&!TEAM.list) return html+'<p class="muted">Carregando…</p></div>';
+  let list=entries();
+  if(!list.length) return html+`<p class="muted">${team?'Ninguém enviou checklist ainda.':'Nenhum checklist ainda.'}</p></div>`;
+  const pill=x=>x.f?(x.nok?`<span class="pill p-nok">${x.nok} Não Ok</span>`:'<span class="pill p-ok">Concluída</span>'):`<span class="pill p-open">${(x.ok||0)+(x.nok||0)+(x.na||0)}/${x.tot||0}</span>`;
+  // 1) pessoas (só admin)
+  if(team&&!V.p){
+    const g=groupBy(list,x=>x.n||'Sem nome');
+    [...g.keys()].sort((a,b)=>a.localeCompare(b,'pt')).forEach(n=>{ const xs=g.get(n), last=Math.max(...xs.map(x=>x.i||0));
+      html+=`<button class="catcard" data-act="bP" data-v="${h(n)}"><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${h(n)}</span><span class="small muted">${xs.length} checklist${xs.length>1?'s':''}</span></div><span class="small muted">Último: ${fmt(last)}</span></button>`; });
+    return html+'</div>';
+  }
+  if(team) list=list.filter(x=>(x.n||'Sem nome')===V.p);
+  // 2) datas
+  if(!V.d){
+    const g=groupBy(list,x=>dayKey(x.i));
+    [...g.keys()].sort().reverse().forEach(k=>{ const xs=g.get(k), ms=[...new Set(xs.map(x=>x.m))].sort(), nok=xs.reduce((s,x)=>s+(x.nok||0),0);
+      html+=`<button class="catcard" data-act="bD" data-v="${k}"><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${dayLabel(k)}</span>${nok?`<span class="pill p-nok">${nok} Não Ok</span>`:''}</div><span class="small muted">${xs.length} checklist${xs.length>1?'s':''} · MHC80: ${ms.map(h).join(', ')}</span></button>`; });
+    return html+'</div>';
+  }
+  list=list.filter(x=>dayKey(x.i)===V.d);
+  // 3) MHCs do dia
+  if(!V.m){
+    const g=groupBy(list,x=>x.m);
+    [...g.keys()].sort().forEach(m=>{ const xs=g.get(m);
+      html+=`<button class="catcard" data-act="bM" data-v="${h(m)}"><span class="nm">MHC80-${h(m)}</span><span class="small muted">${xs.map(x=>(CAT[x.c]||{}).nome||x.c).join(' · ')}</span></button>`; });
+    return html+'</div>';
+  }
+  // 4) checklists (sistemas) daquele MHC no dia
+  list.filter(x=>x.m===V.m).sort((a,b)=>a.i-b.i).forEach(x=>{
+    html+=`<button class="catcard" ${x.own?`data-act="sheetB" data-id="${x.id}"`:`data-act="openR" data-code="${h(x.code)}" data-id="${h(x.id)}"`}>
+      <div class="row" style="justify-content:space-between;width:100%"><span class="nm">${h((CAT[x.c]||{}).nome||x.c)}</span>${pill(x)}</div>
+      <span class="small muted">${ESC[x.e]||''} · início ${fmtH(x.i)}${x.f?' · fim '+fmtH(x.f):' · em andamento'}${x.falta?' · registro pendente':''}</span></button>`; });
   return html+'</div>';
 }
 function vConfirm(){
@@ -614,7 +656,7 @@ function render(){
     case 'wiz': html=vWiz(); break;
     case 'sheet': html=vSheet(); break;
     case 'reg': html=vReg(); break;
-    case 'team': html=vTeam(); break;
+    case 'browse': html=vBrowse(); break;
     default: html=vHome();
   }
   $app.innerHTML=html+vConfirm()+vAsk();
@@ -637,8 +679,8 @@ function goMhc(){
 function back(){
   if(V.v==='mhc') go({v:'home'});
   else if(V.v==='cat'){ draft=null; go({v:'mhc',mhc:V.mhc}); }
-  else if(V.v==='sheet'&&V.ro) go({v:'team'});
-  else if(V.v==='team') go({v:'home'});
+  else if(V.back) go(V.back);
+  else if(V.v==='browse'){ const n=Object.assign({},V); if(n.m) delete n.m; else if(n.d) delete n.d; else if(n.p) delete n.p; else return go(n.src==='own'&&n.fromMhc?{v:'mhc',mhc:n.fromMhc}:{v:'home'}); go(n); }
   else if(V.v==='reg'&&V.only) go({v:'wiz',id:V.id,pos:V.ret});
   else if(V.v==='wiz'||V.v==='sheet'||V.v==='reg'){ const i=curInsp(); go(i?{v:'cat',mhc:i.mhc,cat:i.cat}:{v:'home'}); }
   else go({v:'home'});
@@ -717,7 +759,19 @@ document.addEventListener('click',e=>{
   if(act==='askDel'){ V.confirm=b.dataset.id; return render(); }
   if(act==='noDel'){ V.confirm=null; return render(); }
   if(act==='del'){ const id=V.confirm; delete S.insps[id]; V.confirm=null; saveLocal(); if(SENT[id]){ DEL.push(id); saveSent(); schedule(0); } toast('Inspeção apagada'); return render(); }
-  if(act==='team'){ go({v:'team'}); return loadTeam(); }
+  if(act==='team'){ go({v:'browse',src:'team'}); return loadTeam(); }
+  if(act==='browse') return go({v:'browse',src:'own',fromMhc:V.v==='mhc'?V.mhc:null});
+  if(act==='bP') return go(Object.assign({},V,{p:b.dataset.v}));
+  if(act==='bD') return go(Object.assign({},V,{d:b.dataset.v}));
+  if(act==='bM') return go(Object.assign({},V,{m:b.dataset.v}));
+  if(act==='sheetB') return go({v:'sheet',id:b.dataset.id,back:Object.assign({},V)});
+  if(act==='others'){ const i=S.insps[b.dataset.id]; if(!i) return; return go({v:'mhc',mhc:i.mhc,from:i.id}); }
+  if(act==='quick'){
+    const t=S.insps[V.from]; if(!t) return;
+    const id=newId();
+    const insp={id,mhc:t.mhc,cat:b.dataset.c,escopo:t.escopo,oficina:t.oficina,patio:t.patio,mant:JSON.parse(JSON.stringify(t.mant||[])),inicio:Date.now(),fim:0,ans:{},cp:{}};
+    S.insps[id]=insp; touch(insp); return go({v:'wiz',id,pos:0});
+  }
   if(act==='teamReload') return loadTeam();
   if(act==='openR') return openRemote(b.dataset.code,b.dataset.id);
 });
@@ -746,7 +800,7 @@ document.addEventListener('change',e=>{ const t=e.target;
 
 /* ===================== START ===================== */
 loadLocal();
-if(location.hash==='#equipe'&&AUTH.admin){ V={v:'team'}; render(); loadTeam(); } else render();
+if(location.hash==='#equipe'&&AUTH.admin){ V={v:'browse',src:'team'}; render(); loadTeam(); } else render();
 initCloud();
 </script>
 </body>
