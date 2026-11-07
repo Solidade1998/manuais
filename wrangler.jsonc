@@ -9,5 +9,8 @@
     // Troque o texto abaixo pelo "ID" do KV manuais-db (Storage & Databases → KV)
     { "binding": "DB", "id": "5f791e53278340e69eb90ee7de408d30" }
   ],
+  // checklists em tempo real: Durable Object com SQLite (grátis no plano Free)
+  "durable_objects": { "bindings": [ { "name": "CK", "class_name": "CkStore" } ] },
+  "migrations": [ { "tag": "v1", "new_sqlite_classes": ["CkStore"] } ],
   "keep_vars": true
 }

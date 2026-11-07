@@ -42,6 +42,30 @@ function newCode() {
 const fmtCode = c => c.startsWith('ANDSL') ? 'AND-SL-' + c.slice(5) : c.startsWith('MHC') ? 'MHC-' + c.slice(3) : c;
 const getEntry = async (env, code) => env.DB.get('code:' + code, { type: 'json' });
 const putEntry = (env, code, e) => env.DB.put('code:' + code, JSON.stringify(e));
+// Checklists: no Durable Object CK (tempo real) quando ligado; senão no KV (legado).
+const ckStub = env => env.CK ? env.CK.get(env.CK.idFromName('checklists')) : null;
+async function ckList(env) {
+  const out = [], seen = new Set();
+  const st = ckStub(env);
+  if (st) for (const r of await st.listAll()) { seen.add(r.code + ':' + r.id); out.push(r); }
+  let cursor;
+  do { // checklists antigos que ficaram no KV
+    const page = await env.DB.list({ prefix: 'ck:', cursor });
+    for (const k of page.keys) { const [, code, id] = k.name.split(':'); if (!seen.has(code + ':' + id)) out.push({ code, id, ...(k.metadata || {}) }); }
+    cursor = page.list_complete ? null : page.cursor;
+  } while (cursor);
+  return out;
+}
+async function ckGet(env, code, id) {
+  const st = ckStub(env);
+  if (st) { const d = await st.getOne(code, id); if (d) return JSON.parse(d); }
+  return env.DB.get(`ck:${code}:${id}`, { type: 'json' });
+}
+async function ckDel(env, code, id) {
+  const st = ckStub(env);
+  if (st) await st.delOne(code, id);
+  if (await env.DB.get(`ck:${code}:${id}`)) await env.DB.delete(`ck:${code}:${id}`); // só gasta gravação do KV se existir lá
+}
 const getDocs = async env => (await env.DB.get('docs', { type: 'json' })) || [];
 
 // Onde ficam os pedaços dos PDFs: no R2 (binding FILES, 10 GB grátis) se
@@ -160,13 +184,16 @@ export async function onRequest(context) {
       const st = i.sum || {};
       const meta = { n: String(who.name || '').slice(0, 60), m: String(i.mhc).slice(0, 6), c: String(i.cat).slice(0, 6), e: String(i.escopo || '').slice(0, 1),
         i: +i.inicio || 0, f: +i.fim || 0, u: +i.upd || Date.now(), ok: +st.ok || 0, nok: +st.nok || 0, na: +st.na || 0, tot: +st.tot || 0, falta: +st.falta || 0 };
-      await env.DB.put(`ck:${who.code}:${id}`, JSON.stringify({ ...i, by: meta.n }), { metadata: meta });
-      return json({ ok: true });
+      const data = JSON.stringify({ ...i, by: meta.n });
+      const store = ckStub(env);
+      if (store) { await store.saveOne(who.code, id, meta, data); return json({ ok: true, live: true }); }
+      await env.DB.put(`ck:${who.code}:${id}`, data, { metadata: meta });
+      return json({ ok: true, live: false });
     }
     if (path[0] === 'ck' && path[1] === 'delete' && method === 'POST') {
       const body = await request.json().catch(() => ({}));
       const id = String(body.id || '').replace(/[^a-z0-9]/gi, '').slice(0, 40);
-      if (id) await env.DB.delete(`ck:${who.code}:${id}`);
+      if (id) await ckDel(env, who.code, id);
       return json({ ok: true });
     }
 
@@ -177,25 +204,19 @@ export async function onRequest(context) {
 
     // checklists da equipe: lista (só o resumo) e um completo
     if (what === 'ck' && method === 'GET' && path.length === 2) {
-      const out = [];
-      let cursor;
-      do {
-        const page = await env.DB.list({ prefix: 'ck:', cursor });
-        for (const k of page.keys) { const [, code, id] = k.name.split(':'); out.push({ code, id, ...(k.metadata || {}) }); }
-        cursor = page.list_complete ? null : page.cursor;
-      } while (cursor);
+      const out = await ckList(env);
       out.sort((a, b) => (b.i || 0) - (a.i || 0));
-      return json({ list: out });
+      return json({ list: out, live: !!env.CK });
     }
     if (what === 'ckdelete' && method === 'POST') {
       const body = await request.json().catch(() => ({}));
       const id = String(body.id || '').replace(/[^a-z0-9]/gi, '');
       if (!id) return fail('Checklist inválido.');
-      await env.DB.delete(`ck:${cleanCode(body.code) || 'ADMIN'}:${id}`);
+      await ckDel(env, cleanCode(body.code) || 'ADMIN', id);
       return json({ ok: true });
     }
     if (what === 'ck' && method === 'GET' && path.length === 4) {
-      const i = await env.DB.get(`ck:${cleanCode(path[2]) || 'ADMIN'}:${path[3].replace(/[^a-z0-9]/gi, '')}`, { type: 'json' });
+      const i = await ckGet(env, cleanCode(path[2]) || 'ADMIN', path[3].replace(/[^a-z0-9]/gi, ''));
       if (!i) return fail('Checklist não encontrado.', 404);
       return json({ insp: i });
     }

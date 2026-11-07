@@ -292,8 +292,11 @@ function saveLocal(){
 }
 
 /* ---------- envio para o servidor (o admin vê os checklists da equipe) ----------
-   Para gastar pouco do limite grátis do Cloudflare, envia no máximo a cada 4 min
-   enquanto você mexe, na hora ao finalizar/apagar, e quando o app vai para segundo plano. */
+   Com o banco em tempo real (LIVE), cada resposta é enviada ~1,5 s depois de marcar.
+   Se o servidor ainda estiver no armazenamento antigo (KV, 1 mil gravações/dia),
+   volta a enviar no máximo a cada 4 min, na hora ao finalizar/apagar e ao sair do app. */
+let LIVE=(()=>{ try{ return localStorage.getItem('mhc80ck.live')!=='0'; }catch(e){ return true; } })();
+const SEND_MS=()=>LIVE?1500:240000;
 const AUTH=(()=>{ try{ return JSON.parse(localStorage.getItem('manuais.auth')||'{}')||{}; }catch(e){ return {}; } })();
 const KS='mhc80ck.sent.v1';
 let SENT=(()=>{ try{ return JSON.parse(localStorage.getItem(KS)||'{}')||{}; }catch(e){ return {}; } })();
@@ -307,7 +310,7 @@ async function api(path,body,keepalive){
   const r=await fetch('api/'+path,{method:body?'POST':'GET',headers:Object.assign({authorization:'Bearer '+(AUTH.token||'')},body?{'content-type':'application/json'}:{}),body:body?JSON.stringify(body):undefined,cache:'no-store',keepalive:!!keepalive});
   const d=await r.json().catch(()=>({})); if(!r.ok){ const e=new Error(d.error||('Erro '+r.status)); e.status=r.status; throw e; } return d;
 }
-function touch(insp){ insp.upd=Date.now(); saveLocal(); if(syncState==='cloud') setSync('local'); schedule(240000); }
+function touch(insp){ insp.upd=Date.now(); saveLocal(); if(syncState==='cloud') setSync('local'); schedule(SEND_MS()); }
 function touchProf(){ S.prof.upd=Date.now(); saveLocal(); }
 function schedule(ms){ if(ms===0){ clearTimeout(flushT); flushT=setTimeout(flush,50); return; } if(!flushT) flushT=setTimeout(flush, ms); }
 async function flush(keep){
@@ -317,10 +320,11 @@ async function flush(keep){
   setSync('busy'); let fail=false;
   for(const id of [...DEL]){ try{ await api('ck/delete',{id},keep); DEL=DEL.filter(x=>x!==id); delete SENT[id]; saveSent(); }catch(e){ fail=true; break; } }
   for(const id of ids){ const i=S.insps[id]; if(!i||fail) continue;
-    try{ const up=i.upd; await api('ck/save',Object.assign({},i,{sum:stats(i)}),keep); SENT[id]=up; saveSent(); }
+    try{ const up=i.upd; const r=await api('ck/save',Object.assign({},i,{sum:stats(i)}),keep); SENT[id]=up; saveSent();
+      if(typeof r.live==='boolean' && r.live!==LIVE){ LIVE=r.live; try{ localStorage.setItem('mhc80ck.live',LIVE?'1':'0'); }catch(e){} } }
     catch(e){ fail=true; if(e.status===401||e.status===403){ setSync('local'); flushing=false; return; } } }
   flushing=false;
-  if(fail){ setSync('offline'); schedule(120000); } else setSync(pendingIds().length?'local':'cloud');
+  if(fail){ setSync('offline'); schedule(LIVE?20000:120000); } else if(pendingIds().length){ setSync('local'); schedule(SEND_MS()); } else setSync('cloud');
 }
 function initCloud(){ if(pendingIds().length||DEL.length) schedule(3000); else setSync('cloud'); }
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='hidden'&&(pendingIds().length||DEL.length)) flush(true); });
@@ -333,6 +337,21 @@ async function loadTeam(){
   try{ TEAM.list=(await api('admin/ck')).list; }catch(e){ TEAM.err=e.status?e.message:'Sem internet. Tente de novo com sinal.'; }
   if(V.v==='browse') render();
 }
+/* admin: atualiza sozinho a cada 8 s a lista da equipe e a folha aberta */
+let lastTeam='', lastInsp='';
+setInterval(async()=>{
+  if(document.visibilityState!=='visible'||!AUTH.admin) return;
+  const ae=document.activeElement; if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA')) return;
+  try{
+    if(V.v==='browse'&&V.src==='team'&&TEAM.list){
+      const r=await api('admin/ck'); const j=JSON.stringify(r.list);
+      if(j!==lastTeam){ lastTeam=j; TEAM.list=r.list; if(V.v==='browse'&&V.src==='team'&&!V.confirmR){ const y=window.scrollY; render(); window.scrollTo(0,y); } }
+    } else if(V.v==='sheet'&&V.ro&&TEAM.insp&&TEAM.code){
+      const r=await api('admin/ck/'+encodeURIComponent(TEAM.code)+'/'+encodeURIComponent(TEAM.insp.id)); const j=JSON.stringify(r.insp);
+      if(j!==lastInsp){ lastInsp=j; TEAM.insp=r.insp; if(V.v==='sheet'&&V.ro&&!V.confirmR){ const y=window.scrollY; render(); window.scrollTo(0,y); } }
+    }
+  }catch(e){}
+},8000);
 async function openRemote(code,id){
   toast('Abrindo…');
   try{ TEAM.code=code; TEAM.insp=(await api('admin/ck/'+encodeURIComponent(code)+'/'+encodeURIComponent(id))).insp; go({v:'sheet',ro:true,back:Object.assign({},V)}); }
@@ -623,7 +642,7 @@ function vBrowse(){
   const team=V.src==='team';
   const crumbs=[team?(V.p||'Equipe'):'Meus checklists', V.d&&dayLabel(V.d), V.m&&'MHC80-'+V.m].filter(Boolean).join(' › ');
   let html=topBar(team?'Checklists da <b>equipe</b>':'Histórico por <b>data</b>',true)+'<div class="stack">';
-  html+=`<div class="row" style="justify-content:space-between"><span class="small muted">${h(crumbs)}</span>${team?'<button class="btn ghost" data-act="teamReload">Atualizar</button>':''}</div>`;
+  html+=`<div class="row" style="justify-content:space-between"><span class="small muted">${h(crumbs)}</span>${team?'<span class="small muted">● ao vivo · atualiza a cada 8 s</span>':''}</div>`;
   if(team&&TEAM.err) return html+`<div class="card">${h(TEAM.err)}</div></div>`;
   if(team&&!TEAM.list) return html+'<p class="muted">Carregando…</p></div>';
   let list=entries();

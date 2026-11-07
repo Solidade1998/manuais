@@ -2,6 +2,7 @@
 functions
 worker.js
 server.js
+ckstore.js
 wrangler.jsonc
 _routes.json
 .assetsignore
