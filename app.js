@@ -4,7 +4,7 @@
 // =====================================================================
 import * as pdfjsLib from './lib/pdf.min.mjs';
 
-const APP_VERSION = '3.1.0';
+const APP_VERSION = '3.2.0';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.mjs';
 const LIB = new URL('lib/', location.href).href;
 const PDF_OPTS = {
@@ -46,7 +46,13 @@ const dbGet = (s, k) => idb(s, 'readonly', st => st.get(k));
 const dbPut = (s, v, k) => idb(s, 'readwrite', st => st.put(v, k));
 const dbDel = (s, k) => idb(s, 'readwrite', st => st.delete(k));
 const dbAll = s => idb(s, 'readonly', st => st.getAll());
-const saveDoc = d => dbPut('docs', d);
+const saveDoc = d => {
+  if (d.cloud) { // manual aberto pela nuvem: guarda só favoritos e última página
+    try { const m = JSON.parse(localStorage.getItem('manuais.cloudmeta') || '{}'); m[d.rid] = { favs: d.favs, lastPage: d.lastPage, opened: d.opened }; localStorage.setItem('manuais.cloudmeta', JSON.stringify(m)); } catch {}
+    return Promise.resolve();
+  }
+  return dbPut('docs', d);
+};
 
 // ---------------------------------------------------------------------
 //  Utilidades
@@ -71,7 +77,7 @@ function toast(msg, ms = 2500) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toastT); if (ms) toastT = setTimeout(() => (t.hidden = true), ms);
 }
-const fmtMB = b => b < 1048576 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1048576).toFixed(b > 104857600 ? 0 : 1).replace('.', ',') + ' MB';
+const fmtMB = b => !b ? '0 MB' : b < 1048576 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1048576).toFixed(b > 104857600 ? 0 : 1).replace('.', ',') + ' MB';
 
 // Normalização para busca: sem acento e minúsculo, MESMO tamanho do texto
 // original (assim dá para recortar e destacar o trecho certo).
@@ -147,7 +153,9 @@ const S = {
   cur: null,                   // manual aberto
   ixId: null,                  // manual sendo indexado
 };
-const docById = id => S.docs.find(d => d.id === id);
+const docById = id => S.docs.find(d => d.id === id) || S.cloud.find(d => d.id === id);
+S.cloud = [];            // manuais que ficam só na nuvem (abrem com internet)
+S.cloudBlobs = new Map(); // PDFs da nuvem abertos nesta sessão (só na memória)
 S.brand = (() => { try { return localStorage.getItem('manuais.brand') || 'Todas'; } catch { return 'Todas'; } })();
 const brandOf = d => d.brand || 'Outros';
 const inBrand = d => S.brand === 'Todas' || brandOf(d) === S.brand;
@@ -160,7 +168,7 @@ const pdfCache = new Map();
 function getPdf(id) {
   if (pdfCache.has(id)) { const p = pdfCache.get(id); pdfCache.delete(id); pdfCache.set(id, p); return p; }
   const p = (async () => {
-    const blob = await dbGet('files', id);
+    const blob = id.startsWith('c:') ? S.cloudBlobs.get(id) : await dbGet('files', id);
     if (!blob) throw new Error('Arquivo não encontrado');
     const data = new Uint8Array(await blob.arrayBuffer());
     const task = pdfjsLib.getDocument({ data, ...PDF_OPTS });
@@ -384,7 +392,8 @@ async function wipeAll(reason) {
   closeViewer(true);
   for (const d of [...S.docs]) await removeLocalDoc(d).catch(() => {});
   S.docs = []; S.texts.clear();
-  AUTH = {}; lsSet(LS_AUTH, null); lsSet('manuais.sel', null); try { SEL = null; } catch {}
+  AUTH = {}; lsSet(LS_AUTH, null); lsSet('manuais.sel', null); lsSet('manuais.remote', null); lsSet('manuais.cloudmeta', null); try { SEL = null; } catch {}
+  S.cloud = []; S.cloudBlobs.clear();
   showLogin(reason, true);
 }
 
@@ -428,6 +437,7 @@ async function sync(manual) {
     let remote;
     try { remote = (await api('docs')).docs; }
     catch (e) { if (manual) toast(e.status ? e.message : 'Sem internet — usando os manuais já baixados.'); return; }
+    lastRemote = remote;
     navigator.storage?.persist?.().catch(() => {});
     const byRid = new Map(S.docs.filter(d => d.rid).map(d => [d.rid, d]));
     // removidos da nuvem → sai do aparelho
@@ -468,11 +478,67 @@ async function sync(manual) {
     toast('Download interrompido: ' + (e.status ? e.message : 'sem internet') + '. Toque em ⟳ para continuar.', 6000);
   } finally {
     syncing = false; syncBar(null);
+    refreshCloud(lastRemote);
     if ($('#home').classList.contains('active')) renderHome(true);
     indexQueue();
   }
 }
 $('#btnSync').onclick = () => sync(true);
+
+// ---------------------------------------------------------------------
+//  Manuais "só na nuvem": aparecem com ☁ e abrem pela internet, sem
+//  ocupar espaço no celular.
+// ---------------------------------------------------------------------
+let lastRemote = null;
+const LS_REMOTE = 'manuais.remote';
+const showCloud = () => lsGet('manuais.showcloud', true);
+function refreshCloud(remote) {
+  if (remote) lsSet(LS_REMOTE, remote.map(({ rid, sha, parts, name, file, group, order, cat, brand, size, pages }) => ({ rid, sha, parts, name, file, group, order, cat, brand, size, pages })));
+  const rem = remote || lsGet(LS_REMOTE, []) || [];
+  const meta = lsGet('manuais.cloudmeta', {}) || {};
+  S.cloud = rem.filter(r => !S.docs.some(d => d.rid === r.rid)).map(r => {
+    const old = S.cloud.find(c => c.rid === r.rid && c.sha === r.sha);
+    if (old) return Object.assign(old, { name: r.name, group: r.group || '', order: r.order, cat: r.cat, brand: r.brand || null, _cats: null });
+    const m = meta[r.rid] || {};
+    return { id: 'c:' + r.rid, rid: r.rid, sha: r.sha, parts: r.parts, cloud: true, name: r.name, file: r.file, group: r.group || '', order: r.order, cat: r.cat,
+      brand: r.brand || null, size: r.size, pages: r.pages, outline: null, auto: null, favs: m.favs || [], lastPage: m.lastPage || 1, opened: m.opened || 0,
+      catFix: {}, textDone: true, textProgress: 1 };
+  });
+}
+async function openCloud(d, then) {
+  if (!S.cloudBlobs.has(d.id)) {
+    if (navigator.onLine === false) { toast('Sem internet. Este manual está só na nuvem — baixe-o para usar offline.', 4500); return; }
+    const chunks = []; let got = 0;
+    try {
+      for (let i = 0; i < d.parts; i++) {
+        toast(`☁ Abrindo da nuvem… ${Math.round((got / (d.size || 1)) * 100)}%`, 0);
+        const res = await api(`file/${d.rid}/${d.sha}/${i}`, { raw: true });
+        const b = await res.blob(); chunks.push(b); got += b.size;
+      }
+    } catch (e) { toast('Não deu para abrir pela nuvem: ' + (e.status ? e.message : 'sem internet'), 4500); return; }
+    // guarda na memória no máximo 2 manuais da nuvem
+    while (S.cloudBlobs.size >= 2) {
+      const k = S.cloudBlobs.keys().next().value; S.cloudBlobs.delete(k);
+      const p = pdfCache.get(k); pdfCache.delete(k); p?.then(x => x._task.destroy()).catch(() => {});
+    }
+    S.cloudBlobs.set(d.id, new Blob(chunks, { type: 'application/pdf' }));
+    $('#toast').hidden = true;
+  }
+  if (!d.outline) {
+    try { const pdf = await getPdf(d.id); d.outline = await readOutline(pdf); d.pages = pdf.numPages; d._cats = d._flat = null; }
+    catch { d.outline = []; }
+  }
+  then();
+}
+function setLocal(d, keep) {
+  // keep=true: baixar este manual · keep=false: tirar do celular (continua na nuvem)
+  const r = { rid: d.rid, brand: d.brand, group: d.group };
+  if (!SEL) SEL = AUTH.admin ? { machines: [...new Set((lsGet(LS_REMOTE, []) || []).map(mkey))], docs: [], off: [] } : { machines: [], docs: [], off: [] };
+  const k = mkey(r);
+  if (keep) { SEL.off = SEL.off.filter(x => x !== d.rid); if (!SEL.machines.includes(k) && !SEL.docs.includes(d.rid)) SEL.docs.push(d.rid); }
+  else { SEL.docs = SEL.docs.filter(x => x !== d.rid); if (SEL.machines.includes(k) && !SEL.off.includes(d.rid)) SEL.off.push(d.rid); }
+  lsSet(LS_SEL, SEL);
+}
 window.addEventListener('online', () => sync());
 
 // ---------------------------------------------------------------------
@@ -709,7 +775,13 @@ async function renderSearch(box, q, onlyId) {
     };
     box.append(more); more.onclick = addSome; addSome();
   }
-  if (!topics.length && !pages.length) {
+  const cl = onlyId ? [] : S.cloud.filter(inBrand).filter(d => ts.every(t => norm(d.name + ' ' + d.group).includes(t)));
+  if (cl.length) {
+    box.append(el('h3', { class: 'sec' }, `Na nuvem (${cl.length}) — abre com internet`));
+    for (const d of cl) box.append(el('button', { class: 'row', onclick: () => openCloud(d, () => go({ s: 'manual', id: d.id })) },
+      el('div', { class: 'main' }, el('div', { class: 't' }, '☁ ' + d.name), el('div', { class: 's' }, `${d.brand ? d.brand + ' · ' : ''}${d.group} · ${fmtMB(d.size)}`)), el('div', { class: 'pg' }, '›')));
+  }
+  if (!topics.length && !pages.length && !cl.length) {
     box.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, '🔎'), `Nada encontrado para “${q}”.`));
   }
   if (pending.length) box.append(el('div', { class: 'note' }, `Ainda preparando a busca dentro do texto de: ${pending.map(d => d.name).join(', ')}. Os resultados vão aparecer quando terminar.`));
@@ -761,7 +833,7 @@ $('#searchClear').onclick = () => { $('#search').value = S.q = ''; $('#searchCle
 $('#search').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
 
 function renderBrands() {
-  const brands = [...new Set(S.docs.map(brandOf))].sort((a, b) => (a === 'Outros') - (b === 'Outros') || a.localeCompare(b, 'pt'));
+  const brands = [...new Set([...S.docs, ...(showCloud() ? S.cloud : [])].map(brandOf))].sort((a, b) => (a === 'Outros') - (b === 'Outros') || a.localeCompare(b, 'pt'));
   const box = $('#brands'); box.innerHTML = '';
   if (brands.length < 2) { box.hidden = true; S.brand = 'Todas'; return; }
   if (S.brand !== 'Todas' && !brands.includes(S.brand)) S.brand = 'Todas';
@@ -786,7 +858,8 @@ function renderHome(keepScroll) {
   const y = $('#homeBody').scrollTop;
   renderChips();
   const box = $('#homeBody'); box.innerHTML = '';
-  if (!visDocs().length) {
+  const cloudVis = showCloud() ? S.cloud.filter(inBrand) : [];
+  if (!visDocs().length && !cloudVis.length) {
     box.append(el('div', { class: 'empty' },
       el('div', { class: 'big' }, '📚'),
       AUTH.admin
@@ -820,8 +893,8 @@ function renderHome(keepScroll) {
   }
   // Manuais por grupo
   const groups = new Map();
-  const multi = new Set(S.docs.map(brandOf)).size > 1 && S.brand === 'Todas';
-  for (const d of [...visDocs()].sort(byBrandOrder)) {
+  const multi = new Set([...S.docs, ...S.cloud].map(brandOf)).size > 1 && S.brand === 'Todas';
+  for (const d of [...visDocs(), ...cloudVis].sort(byBrandOrder)) {
     const g = (multi ? brandOf(d) + ' · ' : '') + (d.group || ''); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(d);
   }
   const gOrd = g => Math.min(...groups.get(g).map(d => d.order ?? 999));
@@ -840,6 +913,9 @@ function renderHome(keepScroll) {
 function byBrandOrder(a, b) { return brandOf(a).localeCompare(brandOf(b), 'pt') || byOrder(a, b); }
 function byOrder(a, b) { return (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt', { numeric: true }); }
 function docCard(d) {
+  if (d.cloud) return el('div', { class: 'card cloudcard', role: 'button', onclick: () => openCloud(d, () => go({ s: 'manual', id: d.id })) },
+    el('div', { class: 'name' }, d.name),
+    el('div', { class: 'meta' }, `☁ na nuvem · ${fmtMB(d.size)}${d.pages ? ' · ' + d.pages + ' pág.' : ''}`));
   const meta = `${d.pages} pág.` + (d.outline?.length ? '' : d.auto?.length ? ' · sumário auto' : ' · sem sumário');
   return el('div', { class: 'card', role: 'button', onclick: e => { if (!e.target.closest('.more')) go({ s: 'manual', id: d.id }); } },
     AUTH.admin ? el('button', { class: 'more', 'aria-label': 'Opções', onclick: () => editDocSheet(d) }, '⋯') : null,
@@ -854,7 +930,7 @@ async function footer(box) {
   try {
     const est = await navigator.storage?.estimate?.();
     const total = S.docs.reduce((a, d) => a + d.size, 0);
-    f.textContent = `${S.docs.length} manuais · ${fmtMB(total)}` + (est?.quota ? ` · espaço livre p/ o app: ${fmtMB(est.quota - est.usage)}` : '') + ` · v${APP_VERSION}`;
+    f.textContent = `${S.docs.length} baixados · ${fmtMB(total)}` + (S.cloud.length ? ` · ${S.cloud.length} na nuvem` : '') + (est?.quota ? ` · espaço livre p/ o app: ${fmtMB(est.quota - est.usage)}` : '') + ` · v${APP_VERSION}`;
   } catch {}
 }
 
@@ -940,6 +1016,15 @@ function renderManual(keepScroll) {
   box.innerHTML = '';
   if (S.mq.trim()) { renderSearch(box, S.mq, d.id); return; }
   if (!d.textDone && !d.textFail) box.append(el('div', { class: 'progress', 'data-progtxt': d.id, style: 'margin:6px 2px' }, `Preparando busca… ${Math.round(d.textProgress * 100)}%`));
+  if (d.cloud) box.append(el('div', { class: 'note' }, `☁ Aberto pela nuvem — precisa de internet e não aparece na busca por texto. `,
+    el('button', { class: 'btn-accent', style: 'margin-top:8px;width:100%', onclick: () => {
+      setLocal(d, true); toast(`Baixando “${d.name}” (${fmtMB(d.size)})…`); history.back(); setTimeout(() => sync(true), 300);
+    } }, `📱 Baixar para usar sem internet (${fmtMB(d.size)})`)));
+  else if (d.rid) box.append(el('div', { class: 'muted small', style: 'margin:6px 2px;display:flex;align-items:center;gap:8px' }, `📱 Baixado no celular (${fmtMB(d.size)})`,
+    el('button', { class: 'btn-ghost', style: 'margin-left:auto;font-size:13px', onclick: async () => {
+      if (!confirm(`Tirar “${d.name}” do celular? Ele continua disponível pela nuvem (com internet). Os favoritos dele são apagados.`)) return;
+      setLocal(d, false); await removeLocalDoc(d); refreshCloud(); history.back(); toast('Removido do celular — continua na nuvem ☁');
+    } }, 'Tirar do celular')));
   if (d.favs.length) {
     box.append(el('h3', { class: 'sec' }, 'Favoritos / páginas salvas'));
     for (const f of [...d.favs].sort((a, b) => a.p - b.p))
@@ -952,7 +1037,9 @@ function renderManual(keepScroll) {
     if (!d.outline?.length) box.append(el('div', { class: 'note' }, 'Este PDF não tinha sumário; este foi montado pelos títulos em letra maior. Pode ter falhas — use ☆ no leitor para salvar as páginas que você mais usa.'));
     box.append(renderTree(ol, d, { top: true, showCat: !!d.outline?.length && !d.cat }));
   } else {
-    box.append(el('div', { class: 'note', html: d.textDone
+    box.append(el('div', { class: 'note', html: d.cloud
+      ? 'Este PDF não tem sumário próprio. Toque em <b>Abrir</b> para ler, ou baixe o manual para o app montar um sumário automático.'
+      : d.textDone
       ? 'Este PDF não tem sumário e não deu para montar um automaticamente.<br><br>Abra o manual e toque em <b>☆</b> nas páginas importantes: elas viram o seu sumário aqui.'
       : 'Este PDF não tem sumário. Assim que a preparação terminar, o app tenta montar um sumário pelos títulos.' }));
   }
@@ -1011,7 +1098,11 @@ function confirmDelete(d) {
 const V = { id: null, pdf: null, n: 0, zoom: 1, w: 0, aspect: 1.414, pages: [], obs: null, q: '', hits: [], hitI: 0, cur: 1, token: 0 };
 const pagesEl = $('#pages'), innerEl = $('#pagesInner');
 
-function openViewer(id, page, q) { go({ s: 'viewer', id, p: page || 1, q: q || '' }); }
+function openViewer(id, page, q) {
+  const d = docById(id);
+  if (d?.cloud && !S.cloudBlobs.has(d.id)) return openCloud(d, () => go({ s: 'viewer', id, p: page || 1, q: q || '' }));
+  go({ s: 'viewer', id, p: page || 1, q: q || '' });
+}
 
 async function startViewer(st) {
   const d = docById(st.id); if (!d) return history.back();
@@ -1296,7 +1387,11 @@ function pickWanted(r) {
 function drawPick() {
   const box = $('#pickBody'); box.innerHTML = '';
   const { remote, sel } = PICK;
-  box.append(el('div', { class: 'note' }, 'Marque as máquinas que você atende (ou só os manuais que quiser). Só o que estiver marcado é baixado para o celular. Marcando a máquina inteira, os manuais novos dela também chegam sozinhos.'));
+  box.append(el('div', { class: 'note', html: '<b>✔ Marcado = 📱 baixado no celular</b>: funciona sem internet e entra na busca.<br><b>Desmarcado = ☁ fica na nuvem</b>: aparece na tela inicial e abre com internet, sem ocupar espaço.<br><br>Marcando a máquina inteira, os manuais novos dela também baixam sozinhos.' }));
+  const sc = el('button', { class: 'row', onclick: () => { lsSet('manuais.showcloud', !showCloud()); drawPick(); } },
+    el('div', { class: 'ck ' + (showCloud() ? 'on' : '') }, showCloud() ? '✓' : ''),
+    el('div', { class: 'main' }, el('div', { class: 't' }, 'Mostrar na tela inicial os manuais da nuvem'), el('div', { class: 's' }, 'Desligue para ver só os baixados')));
+  box.append(sc);
   const brands = [...new Set(remote.map(r => r.brand || 'Outros'))].sort((a, b) => a.localeCompare(b, 'pt'));
   for (const b of brands) {
     box.append(el('h3', { class: 'sec' }, b));
@@ -1341,7 +1436,7 @@ function drawPick() {
     }
   }
   const n = remote.filter(pickWanted), tot = n.reduce((a, r) => a + r.size, 0);
-  $('#pickSum').textContent = `${n.length} manuais marcados · ${fmtMB(tot)} no celular`;
+  $('#pickSum').textContent = `📱 ${n.length} baixados · ${fmtMB(tot)} no celular · ☁ ${remote.length - n.length} na nuvem`;
 }
 $('#pickSave').onclick = async () => {
   if (!PICK) return;
@@ -1814,6 +1909,7 @@ async function startApp() {
     catch (e) { toast('Erro ao abrir o banco de dados: ' + e.message, 8000); S.docs = []; }
     for (const d of S.docs) { d.favs ||= []; d.catFix ||= {}; delete d.textFail; } // tenta de novo a cada abertura
     loadTexts(S.docs.filter(d => d.textDone).map(d => d.id)).catch(() => {});
+    refreshCloud();
   }
   history.replaceState({ s: 'home' }, '');
   route({ s: 'home' });
