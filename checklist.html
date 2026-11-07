@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1B2023">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script>/* só abre para quem já entrou com o código no app de manuais */
+try{ var a=JSON.parse(localStorage.getItem('manuais.auth')||'{}'); if(!a||!a.token) location.replace('./'); }catch(e){ location.replace('./'); }</script>
+<title>Checklist MHC80</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Folha de campo: papel claro legível no sol, amarelo de máquina como acento, estado por cor semântica */
+  --bg:#ECEEE9; --paper:#FFFFFF; --ink:#1B2023; --muted:#5A6367; --line:#D2D7D1;
+  --accent:#F2B705; --accent-soft:#FFF3C4;
+  --ok:#1E7A4C; --ok-soft:#E3F3EA; --nok:#C0321C; --nok-soft:#FBE7E3; --na:#5F6670; --na-soft:#ECEEF0; --warn:#9A6400;
+  --display:'Barlow Condensed','Arial Narrow',sans-serif;
+  --body:'Barlow',system-ui,-apple-system,'Segoe UI',sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.4;-webkit-text-size-adjust:100%}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+#app{max-width:680px;margin:0 auto;padding:0 16px 96px}
+.top{position:sticky;top:0;z-index:5;background:var(--ink);color:#fff;margin:0 -16px 16px;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;gap:10px}
+.top .back{background:none;border:0;color:#fff;font-size:26px;line-height:1;padding:4px 8px 4px 0}
+.top .ttl{font-family:var(--display);font-weight:700;font-size:22px;letter-spacing:.3px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .ttl b{color:var(--accent)}
+.sync{font-size:12px;color:#C9CED1;white-space:nowrap}
+.sync::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:#8A9196;margin-right:6px;vertical-align:1px}
+.sync.cloud::before{background:#3FBF7A}.sync.busy::before{background:var(--accent)}.sync.off::before{background:#E0663F}
+h1,h2,h3{font-family:var(--display);font-weight:700;margin:0;text-wrap:balance;letter-spacing:.2px}
+h2{font-size:24px}
+h3{font-size:19px}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.stack{display:flex;flex-direction:column;gap:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:14px}
+.btn{border:0;border-radius:8px;padding:12px 16px;font-weight:600;background:var(--ink);color:#fff;min-height:46px}
+.btn.alt{background:var(--paper);color:var(--ink);border:1.5px solid var(--ink)}
+.btn.y{background:var(--accent);color:var(--ink)}
+.btn.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
+.btn.danger{background:var(--nok)}
+.btn.full{width:100%}
+.btn:disabled{opacity:.45}
+/* home */
+.ask{background:var(--paper);border:1px solid var(--line);border-left:6px solid var(--accent);border-radius:10px;padding:18px}
+.ask label{display:block;font-family:var(--display);font-weight:700;font-size:28px;margin-bottom:12px}
+.mhcin{display:flex;align-items:stretch;border:2px solid var(--ink);border-radius:8px;overflow:hidden;background:#fff}
+.mhcin span{font-family:var(--display);font-weight:700;font-size:26px;padding:8px 4px 8px 12px;background:#fff}
+.mhcin input{border:0;outline:0;font-family:var(--display);font-weight:700;font-size:26px;width:100%;min-width:0;padding:8px 6px}
+.mhcin button{border:0;background:var(--accent);font-weight:700;padding:0 18px}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{border:1.5px solid var(--ink);background:var(--paper);border-radius:999px;padding:7px 14px;font-weight:600}
+.chip.on{background:var(--ink);color:#fff}
+/* category cards */
+.catcard{display:flex;flex-direction:column;gap:8px;text-align:left;width:100%;background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:14px}
+.catcard .nm{font-family:var(--display);font-weight:700;font-size:22px}
+.catcard[disabled]{opacity:.55;cursor:default}
+.bar{height:6px;background:var(--na-soft);border-radius:3px;overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.pill{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 9px;text-transform:uppercase;letter-spacing:.4px}
+.p-ok{background:var(--ok-soft);color:var(--ok)}.p-nok{background:var(--nok-soft);color:var(--nok)}.p-na{background:var(--na-soft);color:var(--na)}.p-open{background:var(--accent-soft);color:var(--warn)}
+/* form */
+.fld{display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px}
+.fld label{font-size:13px;font-weight:600;color:var(--muted)}
+.fld input,.fld textarea{border:1.5px solid var(--line);border-radius:8px;padding:10px;background:#fff;font:inherit;width:100%}
+.fld textarea{min-height:64px;resize:vertical}
+.fld input:focus,.fld textarea:focus{border-color:var(--ink);outline:0}
+.seg{display:flex;border:1.5px solid var(--ink);border-radius:8px;overflow:hidden}
+.seg button{flex:1;border:0;background:var(--paper);padding:11px 4px;font-weight:600}
+.seg button+button{border-left:1.5px solid var(--ink)}
+.seg button.on{background:var(--ink);color:#fff}
+/* wizard */
+.prog{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600}
+.prog .bar{flex:1;height:8px}
+.cond{background:var(--ink);color:#fff;border-radius:8px;padding:10px 12px;font-family:var(--display);font-weight:700;font-size:18px;letter-spacing:.4px;text-transform:uppercase}
+.cond.lig{background:var(--nok)}
+.task{background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.task .hd{display:flex;gap:12px;align-items:flex-start;padding:14px;border-bottom:1px dashed var(--line)}
+.task .sq{font-family:var(--display);font-weight:700;font-size:30px;white-space:nowrap;line-height:1;min-width:44px;text-align:center;background:var(--accent);border-radius:8px;padding:6px 4px}
+.task .meta{font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.task .atv{font-size:19px;font-weight:600;line-height:1.3;margin-top:2px}
+.task .bd{padding:12px 14px;display:flex;flex-direction:column;gap:6px}
+.task .lbl{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.answers{display:grid;grid-template-columns:1fr;gap:10px}
+.ans{display:flex;align-items:center;gap:12px;border:2px solid var(--line);background:var(--paper);border-radius:10px;padding:14px;font-size:19px;font-weight:700;text-align:left;min-height:60px}
+.ans .bx{width:28px;height:28px;border:2px solid currentColor;border-radius:6px;display:grid;place-items:center;font-size:18px;flex:none}
+.ans.ok{color:var(--ok);border-color:var(--ok)}.ans.nok{color:var(--nok);border-color:var(--nok)}.ans.na{color:var(--na);border-color:#A9AFB5}
+.ans.sel.ok{background:var(--ok-soft)}.ans.sel.nok{background:var(--nok-soft)}.ans.sel.na{background:var(--na-soft)}
+.tagw{background:var(--accent-soft);border:2px solid var(--accent);border-radius:8px;padding:8px 10px;font-weight:700;font-size:15px}
+.regcard .sq{font-family:var(--display);font-weight:700;font-size:24px;background:var(--nok);color:#fff;border-radius:6px;padding:2px 10px;white-space:nowrap}
+.nokbox{border:2px solid var(--nok);background:#fff;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.nokbox h3{color:var(--nok)}
+.sug{display:flex;flex-direction:column;gap:6px}
+.sug button{text-align:left;border:1px dashed var(--nok);background:var(--nok-soft);border-radius:8px;padding:8px 10px;font-size:14px}
+.sug b{display:block}
+.chk{display:flex;align-items:center;gap:10px;font-weight:600}
+.chk input{width:22px;height:22px}
+.nav{position:fixed;left:0;right:0;bottom:0;background:var(--paper);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom));z-index:6}
+.nav .in{max-width:680px;margin:0 auto;display:flex;gap:8px}
+.nav .btn{flex:1;padding:10px 8px}
+/* sheet */
+.hdrgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 12px;font-size:14px}
+.hdrgrid div span{display:block;font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.hdrgrid div b{font-variant-numeric:tabular-nums}
+.tblwrap{overflow-x:auto;background:var(--paper);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th{background:#DADFD9;font-size:11px;text-transform:uppercase;letter-spacing:.4px;text-align:left;padding:7px 6px;font-weight:700}
+td{border-top:1px solid var(--line);padding:8px 6px;vertical-align:top}
+td.seq{font-family:var(--display);font-weight:700;font-size:19px;text-align:center;width:34px}
+td.esc{font-size:12px;font-weight:700;text-align:center;width:30px;color:var(--muted)}
+tr.click{cursor:pointer}
+tr.click:active{background:var(--accent-soft)}
+tr.out td{color:#9AA1A6}
+.sub{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase}
+.rbox{display:flex;flex-direction:column;gap:2px;font-size:13px;white-space:nowrap;width:96px}
+.rbox span{padding:1px 4px;border-radius:4px;color:#9AA1A6}
+.rbox span.x{font-weight:700}
+.rbox span.x.ok{background:var(--ok-soft);color:var(--ok)}.rbox span.x.nok{background:var(--nok-soft);color:var(--nok)}.rbox span.x.na{background:var(--na-soft);color:var(--na)}
+.pend{color:var(--warn);font-weight:700;font-size:13px}
+.reg td{font-size:14px}
+.reg tr.done td{opacity:.5}
+.tick{width:26px;height:26px;border:2px solid var(--ink);border-radius:6px;background:#fff;display:grid;place-items:center;font-weight:700}
+.tick.on{background:var(--ok);border-color:var(--ok);color:#fff}
+.tally{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
+.tally div{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:8px 4px}
+.tally b{display:block;font-family:var(--display);font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}
+.tally span{font-size:12px;font-weight:600;color:var(--muted)}
+.modal{position:fixed;inset:0;background:rgba(20,24,26,.55);display:grid;place-items:center;padding:16px;z-index:20}
+.modal .card{max-width:420px;width:100%}
+.toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-weight:600;z-index:30;max-width:90%}
+textarea.copy{width:100%;min-height:200px;font-family:ui-monospace,monospace;font-size:12px}
+@media (prefers-reduced-motion:no-preference){.ans,.btn,.chip{transition:background .12s}}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+/* ===================== FOLHAS (transcritas das fotos) ===================== */
+const SEG3 = (bloq) => [
+  ['1','SEGURANÇA','Freio manual','APLICAR FREIO MANUAL.','Freio manual acionado e volante travado.','D'],
+  ['2','SEGURANÇA','Calço','CALÇAR RODA.','Calçar máquina de acordo com procedimento específico.','D'],
+  ['3','SEGURANÇA','Bloqueio','VERIFICAR SE TODOS OS BLOQUEIOS ESTÃO APLICADOS E IDENTIFICADOS.',bloq,'D']
+];
+const SEG2 = () => SEG3('').slice(0,2);
+const BLOQ_LOCO = 'Bloqueio no Equipamento aplicado. Bloqueio da Chave EC da Locomotiva.';
+const DES = 'Motor diesel desligado', LIG = 'Motor diesel ligado';
+const SAP_ESP = 'Entalhes das sapatas reconhecíveis. Sapatas sem desgastes desiguais, sem desgaste unilateral e sem fraturas que indique a substituição da sapata.';
+const FOLGA_ESP = 'Folga de 5mm, ou seja, o calibre não deve ficar frouxo entre a sapata de freio e a superfície da roda, tampouco não conseguir ser inserido entre essas partes.';
+const MANCAL_ESP = 'Alavancas e timoneiras de freio isentas de danos (empenos e trincas) e partes faltantes.';
+const EDF = 'Empenos, danos físicos, elementos de fixação.';
+
+const CATS = [
+ { id:'mec', nome:'Mecânico', doc:'Sistema Mecânico', conds:[
+  { c:DES, itens:[ ...SEG3(BLOQ_LOCO),
+   ['4','Mecânico','Geral','Limpar todo o equipamento com a utilização de Ferramentas Manuais, Ar comprimido e água quando necessário. Tendo uma maior atenção para componentes elétricos.','Equipamento limpo.','D'],
+   ['5','Mecânico','Motor diesel Cummins QSB4.5','Conferir nível de óleo do motor diesel','Nível do óleo deve estar entre o intervalo mínimo e máximo da vareta. Completar se necessário.','D','oleo'],
+   ['6','Mecânico','Motor diesel Cummins QSB4.5','Conferir nível de líquido de arrefecimento do radiador do Motor diesel','Nível do líquido precisa estar aparente na bolha de inspeção visual.','D','arref'],
+   ['7','Mecânico','Motor diesel Cummins QSB4.5','Verificar possíveis vazamentos em todo o compartimento do motor diesel','Compartimento do motor sem vazamentos. (Limpeza)','D'],
+   ['8','Mecânico','Motor diesel','Inspecionar indicador de saturação do filtro de ar','Filtro limpo para o momento de funcionamento da máquina.','D'],
+   ['9','Mecânico','Lubrificação','Lubrificar rolamento de rotação','Rolamento devidamente lubrificado.','D'],
+   ['10','Mecânico','Correia de transferência','Inspecionar correia de transferência','Assegurar a integridade da correia sem defeitos e problemas.','D'],
+   ['11','Mecânico','Correia de piso','Inspeção do poste de retenção do Suporte e do Mecanismo de acionamento manual','Manter a integridade física da correia de piso.','D','poste'],
+   ['12','Mecânico','Correia do piso','Inspecionar correia/corrente de piso','Manter a integridade física da correia/corrente de piso.','D'],
+   ['13','Mecânico','Correia de transferência','Inspecionar visualmente o cabo de aço que faz o içamento da correia transportadora','Garantir que esteja em boas condições gerais de uso.','S'],
+   ['14','Mecânico','Correia transportadora','Tensionamento das duas correias transportadoras','Precisa estar sem folga.','S'],
+   ['15','Mecânico','Lubrificação','Lubrificar polia de retorno','Polias devidamente lubrificadas.','S'],
+   ['16','Mecânico','Correia de piso','Inspecionar rolamentos traseiros','Verificar nível de desgaste e elementos de fixação (parafusos, etc).','S'],
+   ['17','Mecânico','Poste de retenção','Inspeção do poste de retenção do Suporte e do Mecanismo de acionamento manual','Poste de retenção inspecionado, peças em bom estado de conservação.','S','poste'],
+   ['18','Mecânico','Correia do piso','Ajuste e inspeção do raspador da correia','Raspadores ajustados e sem nenhum dano.','M','raspador'],
+   ['19','Mecânico','Correia do piso','Inspeção de rodas dentadas, dianteiras e traseiras',EDF,'M'],
+   ['20','Mecânico','Correia de transferência','Lubrificação do rolamento da polia traseira','Polias devidamente lubrificadas.','M'],
+   ['21','Mecânico','Correia de transferência','Ajuste e inspeção do raspador da correia',EDF,'M','raspador'],
+   ['22','Mecânico','Correia de transferência','Rastreamento da correia','Correia sem nenhum dano aparente.','M'],
+   ['23','Mecânico','Correia de transferência','Inspeção de polias e rolamentos',EDF,'M']
+  ]},
+  { c:LIG, itens:[ ...SEG2(),
+   ['3','Mecânico','Correia de piso','Inspecionar correia da esteira de piso quanto ao funcionamento','Correia funcionando corretamente, sem nenhum dano, ruptura, rasgos ou rebites ausentes.','D'],
+   ['4','Mecânico','Correia de transferência','Inspecionar correia da esteira de transferência quanto ao funcionamento','Correia funcionando corretamente, sem nenhum dano, ruptura, rasgos ou rebites ausentes.','D'],
+   ['5','Mecânico','Correia de piso','Lubrificar corrente da esteira do piso','Corrente devidamente lubrificada.','D'],
+   ['6','Mecânico','Esteiras','Inspecionar rolamentos traseiros','Rolamentos não gastos, sem sobreaquecimento, sem ruídos incomuns, parafusos apertados.','S'],
+   ['7','Mecânico','Correia de piso','Inspeção de rodas dentadas, dianteiras e traseiras','Rodas dentadas sem rachadura, quebra ou parafusos ausentes.','M'],
+   ['8','Mecânico','Correia de transferência','Ajuste e inspeção do raspador da correia de transferência','Raspador bem ajustado com a correia em funcionamento.','M','raspador'],
+   ['9','Mecânico','Correia de transferência','Rastreamento da correia','Correia alinhada.','M'],
+   ['10','Mecânico','Correia de transferência','Inspeção de polias e rolamentos','Rolamento e polia sem acúmulo de detritos ou rachaduras. Rolamento lubrificado.','M'],
+   ['11','Mecânico','Correia de piso','Ajuste e inspeção do raspador da correia de piso','Raspador bem ajustado com a correia em funcionamento.','M','raspador']
+  ]}
+ ]},
+ { id:'tru', nome:'Truque', doc:'Truque', conds:[
+  { c:DES, itens:[ ...SEG3(BLOQ_LOCO),
+   ['4','Truque','Freio – truque dianteiro','Inspecionar as sapatas de freio.',SAP_ESP,'D','sapata'],
+   ['5','Truque','Freio – truque traseiro','Inspecionar visualmente as sapatas de freio.',SAP_ESP,'D','sapata'],
+   ['6','Truque','Rodeiros','Inspecionar as rodas quanto a defeitos aparentes: calos, friso quebrado, descamação, trincas no aro da roda, sinais de aquecimento – Eixo 1','Conforme descrito no procedimento.','D'],
+   ['7','Truque','Rodeiros','Inspecionar visualmente a pista de rolamento das rodas quanto à existência de sulcos – Eixo 2','Não ter sulcos com profundidade superior a 1/8" ou 3,2 mm.','D'],
+   ['8','Truque','Rodeiros','Inspecionar as rodas quanto a defeitos aparentes: calos, friso quebrado, descamação, trincas no aro da roda, sinais de aquecimento – Eixo 3','Conforme descrito no procedimento.','D'],
+   ['9','Truque','Rodeiros','Inspecionar visualmente a pista de rolamento das rodas quanto à existência de sulcos – Eixo 4','Não ter sulcos com profundidade superior a 1/8" ou 3,2 mm.','D'],
+   ['10','Truque','Rodeiros','Inspecionar molas amortecedoras dos rodeiros quanto a trincas, fraturas, ausência, mola cansada e limpeza – Truque 1','Molas sem danos e limpas.','S'],
+   ['11','Truque','Rodeiros','Inspecionar molas amortecedoras dos rodeiros quanto a trincas, fraturas, ausência, mola cansada e limpeza – Truque 2','Molas sem danos e limpas.','S'],
+   ['12','Truque','Freios','Verificar folga das sapatas de freio com calibre de folga – Eixo 1',FOLGA_ESP,'M','folga'],
+   ['13 FS','Truque','Freios','Verificar folga das sapatas de freio com calibre de folga – Eixo 2',FOLGA_ESP,'M','folga','FS = Folga das Sapatas. Na folha existem dois itens 13: este é o da FOLGA DAS SAPATAS.'],
+   ['13 TF','Truque','Freios','Inspecionar mancais das alavancas e timoneira de freio quanto a empenos, elementos de fixação – Truque 1',MANCAL_ESP,'M',null,'TF = Timoneira de Freio. Na folha existem dois itens 13: este é o das ALAVANCAS E TIMONEIRA.'],
+   ['14','Truque','Freios','Verificar folga das sapatas de freio com calibre de folga – Eixo 3',FOLGA_ESP,'M','folga'],
+   ['15 FS','Truque','Freios','Verificar folga das sapatas de freio com calibre de folga – Eixo 4',FOLGA_ESP,'M','folga','FS = Folga das Sapatas. Na folha existem dois itens 15: este é o da FOLGA DAS SAPATAS.'],
+   ['15 TF','Truque','Freios','Inspecionar mancais das alavancas e timoneira de freio quanto a empenos, elementos de fixação – Truque 2',MANCAL_ESP,'M',null,'TF = Timoneira de Freio. Na folha existem dois itens 15: este é o das ALAVANCAS E TIMONEIRA.']
+  ]}
+ ]},
+ { id:'pne', nome:'Pneumático', doc:'Sistema Pneumático', conds:[
+  { c:DES, itens:[ ...SEG3('Bloqueio aplicado.'),
+   ['4','Pneumático','Reservatórios de ar','Purgar todos os reservatórios de ar do vagão.','Acionar todas as válvulas de escape para eliminar líquidos no sistema.','D'],
+   ['5','Pneumático','Reservatórios de ar','Verificar possíveis vazamentos pneumáticos.','Inspeção visual em componentes de ligação, mangueiras, tubos e reservatórios.','D'],
+   ['6','Pneumático','Engates rápidos','Inspeção e limpeza dos engates rápidos.','Engates rápidos limpos e funcionais, com integridade física em perfeito estado.','S'],
+   ['7','Pneumático','Mangueiras pneumáticas','Verificar estado de conservação das mangueiras pneumáticas.','Conferir possíveis danos, ressecamento, borracha quebradiça.','S']
+  ]},
+  { c:LIG, itens:[ ...SEG3('Bloqueio aplicado.'),
+   ['4','SEGURANÇA','Sinalização','UTILIZAR PLACAS DE VEÍCULO EM MANUTENÇÃO','Aplicar placa de sinalização.','D'],
+   ['5','Pneumático','Válvulas','Inspecionar válvulas quanto a vazamentos, estado físico (fixação, fissuras, danos, desgastes, estado das tomadas e bobinas).','Válvulas sem vazamentos e em perfeito estado físico.','M'],
+   ['6','Pneumático','Mangueiras e tubulações','Inspecionar mangueiras e tubulações pneumáticas quanto a vazamentos, trincas, sinais de ressecamento, acondicionamento em calhas e dutos, fixação, flexibilidade e atrito.','Mangueiras e tubulações sem vazamentos e em perfeito estado físico.','M'],
+   ['7','Pneumático','Mangueiras e tubulações','Inspecionar conexões quanto a vazamentos, fixação, fissuras, danos e desgastes.','Conexões sem vazamentos e em perfeito estado físico.','M']
+  ]}
+ ]},
+ { id:'hid', nome:'Hidráulico', doc:'Sistema Hidráulico', conds:[
+  { c:DES, itens:[ ...SEG3('Bloqueios aplicados conforme procedimento. Do equipamento e chave EC da locomotiva do comboio.'),
+   ['4','Hidráulico','Tanque hidráulico','Verificar nível do tanque hidráulico.','Nível ideal deve estar próximo da marcação de máximo no visor.','D','hidr'],
+   ['5','Hidráulico','Mangueiras e tubulações','Verificar mangueiras, tubulações e suas conexões quanto ao desgaste aparente, vazamentos e seu posicionamento.','Mangueiras, tubulações e conexões sem defeito aparente e bem posicionadas.','D'],
+   ['6','Hidráulico','Filtros de carga','Verifique os filtros quanto a danos na caixa externa do filtro, como perfurações, grandes amassados, danos ao redor da área que anexa à transferência para bombas transportadoras, folgas e vazamentos.','Filtro de carga sem vazamentos e em perfeito estado físico.','D'],
+   ['7','Hidráulico','Filtros hidráulicos de alta pressão','Inspecionar o cartucho da válvula de retenção localizado na base do filtro quanto a desgaste ou danos. Inspecione a carcaça do filtro quanto a desgaste ou danos.','Filtros hidráulicos de alta pressão em perfeito estado físico e limpos.','D'],
+   ['8','Hidráulico','Cilindros','Verificar cilindros hidráulicos','Vazamentos, empenos, danos físicos, elementos de fixação.','D'],
+   ['9','Hidráulico','Filtro do respiro do tanque de combustível','Verifique se o filtro apresenta grandes rachaduras no tambor e se há acúmulo de detritos no fundo do tambor. Certifique-se de que o bocal e o acoplamento não estejam rachados, dobrados ou quebrados.','Filtro do respiro do tanque de combustível em perfeito estado físico.','S'],
+   ['10','Hidráulico','Bomba de emergência','Verifique se há danos na bomba, se há vazamentos em todas as conexões da mangueira, todas as mangueiras quanto a desgaste ou envelhecimento. Certifique-se de que todos os fixadores estejam apertados na bomba.','Bomba de emergência sem vazamentos, sem folgas e em perfeito estado físico.','S'],
+   ['11','Hidráulico','Radiador de óleo','Verificar radiador de óleo hidráulico quanto a sujeira nas aletas e danos aparentes.','Radiador limpo e sem peças danificadas.','S'],
+   ['12','Hidráulico','Bomba hidráulica','Certifique-se de que todas as conexões das mangueiras hidráulicas estejam apertadas, se há vazamentos, rachaduras e separação das conexões. Todos os filtros quanto a vazamentos ou danos.','Bomba hidráulica sem folgas, vazamentos, em perfeito estado físico.','M'],
+   ['13','Hidráulico','Válvulas','Inspecionar válvulas quanto a vazamentos, estado físico (fixação, fissuras, danos, desgastes, estado das tomadas e bobinas).','Válvulas sem vazamentos e em perfeito estado físico.','M'],
+   ['14','Hidráulico','Mangueiras e tubulações','Inspecionar mangueiras e tubulações hidráulicas quanto a vazamentos, trincas, sinais de ressecamento, acondicionamento em calhas e dutos, fixação, flexibilidade e atrito.','Mangueiras e tubulações sem vazamentos e em perfeito estado físico.','M'],
+   ['15','Hidráulico','Motores hidráulicos','Inspecionar motores hidráulicos quanto a vazamentos e estado físico','Motores hidráulicos sem vazamentos e em perfeito estado físico.','M'],
+   ['16','Hidráulico','Filtro de respiro','Inspeção de filtro de respiro do sistema hidráulico.','Manter o circuito hidráulico sem contaminantes que possam agredir o sistema.','M']
+  ]}
+ ]}
+];
+const CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
+
+/* Sugestões para "Não Ok" (tiradas dos registros de tráfego das fotos + exemplo do óleo) */
+const SUG = {
+ oleo:[{f:'Baixo nível de óleo',a:'Completar nível do óleo',m:'Óleo 15W40'}],
+ arref:[{f:'Nível do líquido de arrefecimento baixo',a:'Completar nível do líquido de arrefecimento',m:'Líquido de arrefecimento'}],
+ hidr:[{f:'Nível do óleo hidráulico abaixo do máximo',a:'Completar nível do tanque hidráulico',m:'Óleo hidráulico'}],
+ sapata:[{f:'Sapata com desgaste excessivo eixo _ LD',a:'Trocar sapata',m:'1 unidade A15741'},{f:'Sapata com trincas eixo _ LE',a:'Trocar sapata',m:'1 unidade A15741'}],
+ folga:[{f:'Não foi realizada a medição da folga das sapatas por falta do instrumento de medição',a:'Realizar medição quando disponível o instrumento',m:''}],
+ poste:[{f:'Poste de retenção danificado LE',a:'Troca do cabo',m:'242483-040-00'}],
+ raspador:[{f:'Raspador danificado',a:'Troca do raspador',m:'241920 (1) un'}]
+};
+const ESC = {D:'Diário',S:'Semanal',M:'Mensal'};
+const LV = {D:1,S:2,M:3};
+const RLBL = {ok:'Ok',nok:'Não Ok',na:'Não se aplica'};
+
+/* ===================== ESTADO ===================== */
+const KI='mhc80ck.insps.v1', KP='mhc80ck.prof.v1';
+let S = { insps:{}, prof:{ mant:[{nome:'',mat:'',turma:''},{nome:'',mat:'',turma:''}], oficina:'', patio:'', upd:0 } };
+let V = { v:'home' };
+let draft = null; // nova inspeção em edição
+
+function loadLocal(){
+  try{ const a=JSON.parse(localStorage.getItem(KI)||'{}'); if(a&&typeof a==='object') S.insps=a; }catch(e){}
+  try{ const p=JSON.parse(localStorage.getItem(KP)||'null'); if(p) S.prof=Object.assign(S.prof,p); }catch(e){}
+}
+function saveLocal(){
+  try{ localStorage.setItem(KI,JSON.stringify(S.insps)); localStorage.setItem(KP,JSON.stringify(S.prof)); }catch(e){}
+}
+
+/* ---------- nuvem (conta Claude, privado por pessoa) ---------- */
+let COL=null, PROF=null, dirty=new Set(), profDirty=false, flushT=null, flushing=false, syncState='local';
+function setSync(s){ syncState=s; const el=document.getElementById('sync'); if(el){ el.className='sync '+({cloud:'cloud',busy:'busy',offline:'off'}[s]||''); el.textContent=syncText(); } }
+function syncText(){ return ({cloud:'Salvo na conta',busy:'Salvando…',offline:'Sem sinal · salvo no celular'}[syncState]||'Salvo no celular'); }
+function touch(insp){ insp.upd=Date.now(); saveLocal(); dirty.add(insp.id); schedule(); }
+function touchProf(){ S.prof.upd=Date.now(); saveLocal(); profDirty=true; schedule(); }
+function schedule(ms){ clearTimeout(flushT); flushT=setTimeout(flush, ms||800); }
+async function flush(){
+  if(!COL || flushing) return;
+  flushing=true; setSync('busy');
+  let retry=false;
+  try{
+    for(const id of [...dirty]){
+      dirty.delete(id);
+      const i=S.insps[id];
+      try{
+        if(!i) await COL.doc(id).delete();
+        else await COL.doc(id).set(JSON.parse(JSON.stringify(i)));
+      }catch(e){
+        if(e && (e.code==='unavailable'||e.code==='resource_exhausted')){ dirty.add(id); retry=true; break; }
+        if(e && e.code==='quota_exceeded'){ toast('Limite de armazenamento na conta atingido. Apague inspeções antigas.'); }
+        else { COL=null; setSync('local'); flushing=false; return; }
+      }
+    }
+    if(profDirty && PROF){ profDirty=false; try{ await PROF.set(JSON.parse(JSON.stringify(S.prof))); }catch(e){ profDirty=true; retry=true; } }
+  }finally{ flushing=false; }
+  if(retry){ setSync('offline'); schedule(6000); }
+  else { setSync('cloud'); if(dirty.size||profDirty) schedule(); }
+}
+async function initCloud(){
+  if(!window.claude || typeof window.claude.use!=='function'){ setSync('local'); return; }
+  try{
+    const [u,db]=await Promise.all([claude.use('user'),claude.use('db')]);
+    if(!u||!db){ setSync('local'); return; }
+    const id=await u.id(); if(!id){ setSync('local'); return; }
+    COL=db.doc('data/users/'+id+'/main').collection('insp');
+    PROF=db.doc('data/users/'+id+'/profile');
+    let first=true;
+    const t=setTimeout(()=>{ if(first) setSync('offline'); },10000);
+    COL.onSnapshot(snap=>{
+      let changed=false;
+      snap.docs.forEach(d=>{ const r=d.data(); if(!r||!r.id) return; const l=S.insps[r.id];
+        if(!l || (r.upd||0)>(l.upd||0)){ S.insps[r.id]=JSON.parse(JSON.stringify(r)); changed=true; } });
+      if(first && !snap.metadata.fromCache){
+        first=false; clearTimeout(t);
+        const ids=new Set(snap.docs.map(d=>d.id));
+        Object.keys(S.insps).forEach(k=>{ if(!ids.has(k)) dirty.add(k); });
+        if(dirty.size) schedule(300); else setSync('cloud');
+      }
+      if(changed){ saveLocal(); softRender(); }
+    }, e=>{ clearTimeout(t); COL=null; setSync('local'); });
+    const ps=await PROF.get();
+    if(ps.exists){ const r=ps.data(); if((r.upd||0)>(S.prof.upd||0)){ S.prof=JSON.parse(JSON.stringify(r)); saveLocal(); softRender(); } }
+    else if(S.prof.upd){ profDirty=true; schedule(); }
+  }catch(e){ COL=null; setSync('local'); }
+}
+
+/* ===================== HELPERS ===================== */
+const $app=document.getElementById('app');
+const h=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const p2=n=>String(n).padStart(2,'0');
+function fmt(t){ if(!t) return '—'; const d=new Date(t); return `${p2(d.getDate())}/${p2(d.getMonth()+1)}/${String(d.getFullYear()).slice(2)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; }
+function fmtD(t){ return fmt(t).slice(0,8); }
+function fmtH(t){ return t? fmt(t).slice(9):'—'; }
+function newId(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function normMhc(s){ const d=String(s||'').replace(/\D/g,''); if(!d) return ''; return d.length<2? d.padStart(2,'0'): d; }
+
+function itemsOf(insp){
+  const out=[]; CAT[insp.cat].conds.forEach((cd,ci)=>cd.itens.forEach((it,ii)=>{
+    out.push({key:ci+'-'+ii, ci, cond:cd.c, seq:it[0], sis:it[1], sub:it[2], atv:it[3], esp:it[4], esc:it[5], sug:it[6], tag:it[7], inScope:LV[it[5]]<=LV[insp.escopo]});
+  })); return out;
+}
+const scoped = insp => itemsOf(insp).filter(i=>i.inScope);
+function stats(insp){
+  const it=scoped(insp); let ok=0,nok=0,na=0,falta=0;
+  it.forEach(i=>{ const a=insp.ans[i.key]; if(!a||!a.r) return; if(a.r==='ok')ok++; else if(a.r==='na')na++; else { nok++; if(!(a.falha||'').trim()) falta++; } });
+  return {tot:it.length, ok, nok, na, done:ok+nok+na, falta};
+}
+function inspsFor(mhc,cat){ return Object.values(S.insps).filter(i=>i.mhc===mhc&&(!cat||i.cat===cat)).sort((a,b)=>b.inicio-a.inicio); }
+function mhcList(){ return [...new Set(Object.values(S.insps).map(i=>i.mhc))].sort(); }
+function learned(insp,item){
+  const out=[], seen=new Set();
+  Object.values(S.insps).sort((a,b)=>(b.upd||0)-(a.upd||0)).forEach(o=>{
+    if(o.cat!==insp.cat) return;
+    const map=Object.fromEntries(itemsOf(o).map(x=>[x.key,x]));
+    Object.entries(o.ans||{}).forEach(([k,a])=>{
+      if(o.id===insp.id&&k===item.key) return;
+      if(a.r!=='nok'||!(a.falha||'').trim()) return;
+      const x=map[k]; if(!x||x.atv!==item.atv) return;
+      const s={f:a.falha,a:a.acao||'',m:a.mat||''}; const sig=s.f+'|'+s.a+'|'+s.m;
+      if(!seen.has(sig)){ seen.add(sig); out.push(s); }
+    });
+  });
+  (SUG[item.sug]||[]).forEach(s=>{ const sig=s.f+'|'+s.a+'|'+s.m; if(!seen.has(sig)){ seen.add(sig); out.push(s); } });
+  return out.slice(0,4);
+}
+function bar(st){
+  if(!st.tot) return '<div class="bar"></div>';
+  const w=n=>(n/st.tot*100).toFixed(1)+'%';
+  return `<div class="bar" aria-hidden="true"><i style="width:${w(st.ok)};background:var(--ok)"></i><i style="width:${w(st.nok)};background:var(--nok)"></i><i style="width:${w(st.na)};background:#A9AFB5"></i></div>`;
+}
+let toastT;
+function toast(msg){ let el=document.querySelector('.toast'); if(!el){ el=document.createElement('div'); el.className='toast'; el.setAttribute('role','status'); document.body.appendChild(el);} el.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>el.remove(),2600); }
+
+/* ===================== VIEWS ===================== */
+function top(title, back){
+  return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:''}<div class="ttl">${title}</div><span id="sync" class="sync">${syncText()}</span></header>`;
+}
+
+function vHome(){
+  const recent=mhcList();
+  const abertas=Object.values(S.insps).filter(i=>!i.fim).sort((a,b)=>(b.upd||0)-(a.upd||0));
+  return top('Checklist <b>MHC80</b>').replace('<div class="ttl">','<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a><div class="ttl">') + `<div class="stack">
+  <section class="ask">
+    <label for="mhcIn">Qual MHC você está?</label>
+    <div class="mhcin"><span>MHC80-</span><input id="mhcIn" inputmode="numeric" maxlength="3" placeholder="04" autocomplete="off"><button data-act="goMhc">Abrir</button></div>
+    ${recent.length?`<div class="stack" style="margin-top:14px;gap:6px"><span class="small muted">Já inspecionados</span><div class="chips">${recent.map(m=>`<button class="chip" data-act="openMhc" data-m="${h(m)}">MHC80-${h(m)}</button>`).join('')}</div></div>`:''}
+  </section>
+  ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
+  <section class="card stack" style="gap:8px"><b>Cópia de segurança</b>
+    <span class="small muted">As inspeções ficam guardadas neste celular. Faça uma cópia de vez em quando, ou antes de trocar de celular ou limpar os dados do navegador.</span>
+    <div class="row"><button class="btn alt" data-act="exp">Salvar cópia</button><button class="btn ghost" data-act="imp">Restaurar cópia</button></div>
+    <input type="file" id="impFile" accept="application/json,.json" hidden>
+  </section>
+  <p class="small muted">Os itens vêm da folha impressa (CL-ENG, válida até 19/11/2029). Se a folha mudar de versão, confira os itens antes de usar.</p>
+  </div>`;
+}
+function cardInsp(i){
+  const st=stats(i), c=CAT[i.cat];
+  return `<div class="card stack" style="gap:8px">
+    <div class="row" style="justify-content:space-between"><b>MHC80-${h(i.mhc)} · ${h(c.nome)}</b><span class="pill p-open">${ESC[i.escopo]}</span></div>
+    <div class="small muted">Início ${fmt(i.inicio)} · ${st.done} de ${st.tot} respondidos${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}${st.falta?` · <b style="color:var(--warn)">registro pendente</b>`:''}</div>
+    ${bar(st)}
+    <div class="row"><button class="btn y" data-act="wiz" data-id="${i.id}">Continuar</button><button class="btn alt" data-act="sheet" data-id="${i.id}">Ver folha</button></div>
+  </div>`;
+}
+
+function vMhc(){
+  const m=V.mhc;
+  const cards=CATS.map(c=>{
+    const last=inspsFor(m,c.id)[0];
+    let info='<span class="small muted">Nenhuma inspeção ainda</span>', b='';
+    if(last){ const st=stats(last); b=bar(st);
+      info=`<div class="row" style="justify-content:space-between"><span class="small muted">${last.fim?'Última':'Em andamento'} · ${fmtD(last.inicio)} · ${ESC[last.escopo]}</span>${last.fim?(st.nok?`<span class="pill p-nok">${st.nok} Não Ok</span>`:`<span class="pill p-ok">Concluída</span>`):`<span class="pill p-open">${st.done}/${st.tot}</span>`}</div>`; }
+    const n=c.conds.reduce((s,cd)=>s+cd.itens.length,0);
+    return `<button class="catcard" data-act="openCat" data-c="${c.id}"><span class="nm">${c.nome}</span><span class="small muted">${c.conds.map(cd=>cd.c).join(' + ')} · ${n} itens</span>${info}${b}</button>`;
+  }).join('');
+  return top(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">${cards}
+    <button class="catcard" disabled><span class="nm">Elétrico</span><span class="small muted">Em breve</span></button></div>`;
+}
+
+function vCat(){
+  const c=CAT[V.cat], list=inspsFor(V.mhc,V.cat);
+  const aberta=list.find(i=>!i.fim);
+  let html=top(`MHC80-${h(V.mhc)} · <b>${c.nome}</b>`,true)+'<div class="stack">';
+  if(aberta && !draft) html+=cardInsp(aberta);
+  if(draft){
+    const d=draft;
+    html+=`<section class="card stack">
+      <h3>Nova inspeção · ${c.nome}</h3>
+      <div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">Escopo a ser executado</span>
+        <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="esc" data-v="${k}" class="${d.escopo===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
+        <span class="small muted">${d.escopo==='D'?'Só itens diários.':d.escopo==='S'?'Itens diários e semanais.':'Todos os itens (diários, semanais e mensais).'} ${scoped({cat:V.cat,escopo:d.escopo}).length} itens.</span></div>
+      <div class="row"><div class="fld"><label for="d-of">Oficina</label><input id="d-of" data-d="oficina" value="${h(d.oficina)}" placeholder="GIU"></div>
+        <div class="fld"><label for="d-pa">Pátio</label><input id="d-pa" data-d="patio" value="${h(d.patio)}" placeholder="P2114"></div></div>
+      ${d.mant.map((m,ix)=>`<div class="row"><div class="fld" style="flex:2"><label for="m${ix}n">Mantenedor ${ix+1}${ix?' (opcional)':''}</label><input id="m${ix}n" data-m="${ix}" data-k="nome" value="${h(m.nome)}"></div>
+        <div class="fld"><label for="m${ix}m">Matrícula</label><input id="m${ix}m" inputmode="numeric" data-m="${ix}" data-k="mat" value="${h(m.mat)}"></div>
+        <div class="fld"><label for="m${ix}t">Turma</label><input id="m${ix}t" data-m="${ix}" data-k="turma" value="${h(m.turma)}"></div></div>`).join('')}
+      <div class="row"><button class="btn y" data-act="start">Começar checklist</button><button class="btn ghost" data-act="cancelDraft">Cancelar</button></div>
+    </section>`;
+  } else {
+    html+=`<button class="btn ${aberta?'alt':'y'} full" data-act="newDraft">Nova inspeção</button>`;
+  }
+  const hist=list.filter(i=>i!==aberta);
+  if(hist.length){
+    html+='<h3>Histórico</h3>'+hist.map(i=>{ const st=stats(i);
+      return `<div class="card row" style="justify-content:space-between">
+        <div><b>${fmt(i.inicio)}</b> <span class="small muted">· ${ESC[i.escopo]}</span><div class="small muted">${st.ok} Ok · ${st.nok} Não Ok · ${st.na} N/A${i.fim?'':' · não finalizada'}${st.falta?' · <b style="color:var(--warn)">registro pendente</b>':''}</div></div>
+        <div class="row"><button class="btn alt" data-act="sheet" data-id="${i.id}">Folha</button><button class="btn ghost" data-act="askDel" data-id="${i.id}" aria-label="Apagar">Apagar</button></div></div>`; }).join('');
+  }
+  return html+'</div>';
+}
+
+function vWiz(){
+  const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
+  const items=scoped(insp), st=stats(insp), c=CAT[insp.cat];
+  const ttl=`MHC80-${h(insp.mhc)} · <b>${c.nome}</b>`;
+  if(V.pos>=items.length) return vSummary(insp,items,st,ttl);
+  const it=items[V.pos], a=insp.ans[it.key]||{};
+  const lig=it.cond===LIG;
+  let html=top(ttl,true)+`<div class="stack">
+   <div class="prog"><span>${V.pos+1} de ${items.length}</span>${bar(st)}</div>
+   <div class="cond ${lig?'lig':''}">${lig?'⚠ ':''}${h(it.cond)}</div>
+   <article class="task">
+     <div class="hd"><div class="sq">${h(it.seq)}</div><div><div class="meta">${h(it.sis)} · ${h(it.sub)}</div><div class="atv">${h(it.atv)}</div></div></div>
+     ${it.tag?`<div class="bd" style="padding-bottom:0"><div class="tagw">⚠ ${h(it.tag)}</div></div>`:''}
+     <div class="bd"><span class="lbl">Resultado esperado</span><div>${h(it.esp)}</div>
+     <div class="row small muted" style="margin-top:4px"><span class="pill p-na">${ESC[it.esc]}</span></div></div>
+   </article>
+   <div class="answers" role="group" aria-label="Resultado encontrado">
+     ${['ok','nok','na'].map(r=>`<button class="ans ${r} ${a.r===r?'sel':''}" data-act="ans" data-r="${r}"><span class="bx">${a.r===r?'✕':''}</span>${RLBL[r]}</button>`).join('')}
+   </div>`;
+  if(a.r==='nok') html+=`<p class="small" style="margin:0;color:var(--nok);font-weight:600">Marcado como Não Ok. A falha você descreve no registro de tráfego, no final.</p>`;
+  html+=`</div><nav class="nav"><div class="in">
+    <button class="btn ghost" data-act="prev" ${V.pos===0?'disabled':''}>‹ Anterior</button>
+    <button class="btn ghost" data-act="sheet" data-id="${insp.id}">Folha</button>
+    <button class="btn ghost" data-act="next">Pular ›</button></div></nav>`;
+  return html;
+}
+
+function vSummary(insp,items,st,ttl){
+  const falt=items.map((it,ix)=>({it,ix,a:insp.ans[it.key]})).filter(o=>!o.a||!o.a.r);
+  const nokSem=items.map((it,ix)=>({it,ix,a:insp.ans[it.key]})).filter(o=>o.a&&o.a.r==='nok'&&!(o.a.falha||'').trim());
+  return top(ttl,true)+`<div class="stack">
+    <h2>${insp.fim?'Inspeção finalizada':'Fim do checklist'}</h2>
+    <div class="tally"><div><b>${st.ok}</b><span>Ok</span></div><div><b style="color:var(--nok)">${st.nok}</b><span>Não Ok</span></div><div><b>${st.na}</b><span>N/A</span></div><div><b style="color:var(--warn)">${falt.length}</b><span>Sem resposta</span></div></div>
+    ${falt.length?`<div class="card stack" style="gap:8px"><b>Itens sem resposta</b>${falt.map(o=>`<button class="btn ghost" style="text-align:left" data-act="goto" data-p="${o.ix}">Seq ${h(o.it.seq)} · ${h(o.it.atv)}</button>`).join('')}</div>`:''}
+    ${st.nok?`<div class="card stack" style="gap:8px;border-left:6px solid var(--nok)"><b>Registro de solicitações de tráfego</b><span class="small muted">${st.nok} item(ns) Não Ok: Seq ${items.filter(i=>(insp.ans[i.key]||{}).r==='nok').map(i=>h(i.seq)).join(', ')}. ${nokSem.length?nokSem.length+' ainda sem falha descrita. Pode preencher agora ou depois.':'Tudo preenchido.'}</span><button class="btn y full" data-act="reg" data-id="${insp.id}">Preencher registro de tráfego</button></div>`:''}
+    ${insp.fim?`<p class="muted">Fim registrado: ${fmt(insp.fim)}</p>`:`<button class="btn y full" data-act="finish">Finalizar inspeção (registra hora do fim)</button>`}
+    <button class="btn alt full" data-act="sheet" data-id="${insp.id}">Ver folha para passar no papel</button>
+  </div>`;
+}
+
+function vReg(){
+  const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
+  const c=CAT[insp.cat], reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok');
+  window.__sugR={};
+  let html=top(`Registro de tráfego · <b>MHC80-${h(insp.mhc)}</b>`,true)+`<div class="stack">
+   <p class="muted" style="margin:0">${c.nome} · ${fmt(insp.inicio)}. Tudo salva sozinho enquanto você digita. Pode sair e voltar depois.</p>`;
+  if(!reg.length) html+=`<p>Nenhum item Não Ok nesta inspeção.</p>`;
+  reg.forEach(i=>{ const a=insp.ans[i.key]; const sg=learned(insp,i); window.__sugR[i.key]=sg; const k=i.key;
+    html+=`<section class="card stack regcard" style="gap:10px">
+      <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><span class="sq">${h(i.seq)}</span><div><div class="sub">${h(i.cond)} · ${h(i.sub)}</div><div style="font-weight:600">${h(i.atv)}</div></div></div>
+      ${i.tag?`<div class="tagw">⚠ ${h(i.tag)}</div>`:''}
+      ${sg.length?`<div class="sug"><span class="small muted">Toque para preencher</span>${sg.map((s,ix)=>`<button data-act="sugR" data-k="${k}" data-i="${ix}"><b>${h(s.f)}</b>${h(s.a)}${s.m?' · '+h(s.m):''}</button>`).join('')}</div>`:''}
+      <div class="fld"><label for="f${k}a">Falha encontrada</label><textarea id="f${k}a" data-rk="${k}" data-f="falha">${h(a.falha)}</textarea></div>
+      <div class="fld"><label for="f${k}b">Ação corretiva (solução ou tentativa)</label><textarea id="f${k}b" data-rk="${k}" data-f="acao">${h(a.acao)}</textarea></div>
+      <div class="row"><div class="fld" style="flex:2"><label for="f${k}c">Material</label><input id="f${k}c" data-rk="${k}" data-f="mat" value="${h(a.mat)}"></div>
+      <div class="fld"><label for="f${k}d">Nº OS / Ocorrência</label><input id="f${k}d" data-rk="${k}" data-f="os" value="${h(a.os)}"></div></div>
+      <label class="chk"><input type="checkbox" data-rk="${k}" data-f="corr" ${a.corr?'checked':''}> Corrigido na hora</label>
+    </section>`; });
+  html+=`<button class="btn alt full" data-act="sheet" data-id="${insp.id}">Ver folha completa</button></div>`;
+  return html;
+}
+
+function rbox(r){ return `<div class="rbox">${['ok','nok','na'].map(k=>`<span class="${r===k?'x '+k:''}">(${r===k?'X':'&nbsp;&nbsp;'}) ${k==='na'?'N/A':RLBL[k]}</span>`).join('')}</div>`; }
+
+function vSheet(){
+  const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
+  const c=CAT[insp.cat], all=itemsOf(insp), st=stats(insp), sc=scoped(insp);
+  const mant=(insp.mant||[]).filter(m=>m.nome||m.mat);
+  let html=top(`Folha · MHC80-${h(insp.mhc)} · <b>${c.nome}</b>`,true)+`<div class="stack">
+   <section class="card hdrgrid">
+     <div><span>Local</span><b>Oficina: ${h(insp.oficina)||'—'}</b><br><b>Pátio: ${h(insp.patio)||'—'}</b></div>
+     <div><span>Equipamento</span><b>MHC80: ${h(insp.mhc)}</b></div>
+     <div><span>Início</span><b>${fmtD(insp.inicio)} às ${fmtH(insp.inicio)}</b></div>
+     <div><span>Fim</span><b>${insp.fim?fmtD(insp.fim)+' às '+fmtH(insp.fim):'em andamento'}</b></div>
+     <div><span>Escopo a ser executado</span><b>(X) ${ESC[insp.escopo]}</b></div>
+     <div><span>Visita · Duração</span><b>N/A · Não medido</b></div>
+     <div style="grid-column:1/-1"><span>Banco de assinaturas · Mantenedores</span>${mant.length?mant.map(m=>`<b>${h(m.nome)} / ${h(m.mat)} / ${h(m.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
+   </section>
+   <div class="tally"><div><b>${st.ok}</b><span>Ok</span></div><div><b style="color:var(--nok)">${st.nok}</b><span>Não Ok</span></div><div><b>${st.na}</b><span>N/A</span></div><div><b style="color:var(--warn)">${st.tot-st.done}</b><span>Sem resposta</span></div></div>
+   <p class="small muted" style="margin:0">Toque numa linha para corrigir a resposta.</p>`;
+  c.conds.forEach((cd,ci)=>{
+    const rows=all.filter(i=>i.ci===ci);
+    html+=`<h3>Condição: ${h(cd.c)}</h3><div class="tblwrap"><table><thead><tr><th>Seq</th><th>Atividade</th><th>Resultado encontrado</th><th>Esc.</th></tr></thead><tbody>`+
+      rows.map(i=>{ const a=insp.ans[i.key]||{}; const pos=sc.findIndex(x=>x.key===i.key);
+        if(!i.inScope) return `<tr class="out"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}</td><td class="small">fora do escopo</td><td class="esc">${i.esc}</td></tr>`;
+        return `<tr class="click" data-act="goto" data-p="${pos}"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}${a.r==='nok'&&!(a.falha||'').trim()?'<div class="pend">Falta descrever a falha</div>':''}</td><td>${a.r?rbox(a.r):'<span class="pend">Sem resposta</span>'}</td><td class="esc">${i.esc}</td></tr>`;
+      }).join('')+`</tbody></table></div>`;
+  });
+  const reg=sc.filter(i=>(insp.ans[i.key]||{}).r==='nok');
+  html+=`<h3>Registro de solicitações de tráfego (atividades corretivas)</h3>`+(reg.length?`<button class="btn y" data-act="reg" data-id="${insp.id}">Preencher / editar registro</button>`:'');
+  if(!reg.length) html+=`<p class="muted" style="margin:0">Nenhum Não Ok. Nada para registrar no verso.</p>`;
+  else html+=`<div class="tblwrap"><table class="reg"><thead><tr><th>Seq</th><th>Falha encontrada</th><th>Ação corretiva</th><th>Material</th><th>Nº OS</th><th>Passei</th></tr></thead><tbody>`+
+    reg.map(i=>{ const a=insp.ans[i.key]; const cp=(insp.cp||{})[i.key];
+      return `<tr class="${cp?'done':''}"><td class="seq">${h(i.seq)}</td><td>${h(a.falha)||'<span class="pend">preencher</span>'}${a.corr?'<div class="small" style="color:var(--ok);font-weight:700">(X) Corrigido</div>':''}</td><td>${h(a.acao)}</td><td>${h(a.mat)}</td><td>${h(a.os)}</td>
+        <td><button class="tick ${cp?'on':''}" data-act="cp" data-k="${i.key}" aria-label="Marcar como passado para a folha">${cp?'✓':''}</button></td></tr>`; }).join('')+`</tbody></table></div>`;
+  html+=`<div class="row"><button class="btn y" data-act="copy">Copiar resumo em texto</button>${insp.fim?'':`<button class="btn alt" data-act="wiz" data-id="${insp.id}">Continuar checklist</button>`}</div>
+   ${V.copyText?`<textarea class="copy" readonly id="copyTxt">${h(V.copyText)}</textarea>`:''}
+  </div>`;
+  return html;
+}
+
+function vConfirm(){
+  if(!V.confirm) return '';
+  const i=S.insps[V.confirm];
+  return `<div class="modal" role="dialog" aria-modal="true"><div class="card stack"><h3>Apagar inspeção?</h3>
+   <p style="margin:0">${i?`MHC80-${h(i.mhc)} · ${CAT[i.cat].nome} · ${fmt(i.inicio)}`:''}. Não dá para desfazer.</p>
+   <div class="row"><button class="btn danger" data-act="del">Apagar</button><button class="btn ghost" data-act="noDel">Cancelar</button></div></div></div>`;
+}
+
+function textOf(insp){
+  const c=CAT[insp.cat], L=[];
+  L.push(`CHECKLIST MHC80-${insp.mhc} · ${c.doc} · ${ESC[insp.escopo].toUpperCase()}`);
+  L.push(`Início ${fmt(insp.inicio)} · Fim ${insp.fim?fmt(insp.fim):'—'}`);
+  L.push(`Oficina: ${insp.oficina||'—'} · Pátio: ${insp.patio||'—'}`);
+  (insp.mant||[]).filter(m=>m.nome).forEach(m=>L.push(`Mantenedor: ${m.nome} / ${m.mat} / ${m.turma}`));
+  c.conds.forEach((cd,ci)=>{ L.push(''); L.push(`— ${cd.c.toUpperCase()} —`);
+    itemsOf(insp).filter(i=>i.ci===ci&&i.inScope).forEach(i=>{ const a=insp.ans[i.key]||{}; L.push(`${i.seq}. ${a.r?RLBL[a.r]:'(sem resposta)'} – ${i.sub}`); }); });
+  const reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok');
+  if(reg.length){ L.push(''); L.push('— REGISTRO DE SOLICITAÇÕES DE TRÁFEGO —');
+    reg.forEach(i=>{ const a=insp.ans[i.key]; L.push(`Seq ${i.seq}: ${a.falha||'?'} | Ação: ${a.acao||'-'} | Material: ${a.mat||'-'}${a.os?' | OS '+a.os:''}${a.corr?' | Corrigido':''}`); }); }
+  return L.join('\n');
+}
+
+/* ===================== RENDER ===================== */
+let pendingRender=false;
+function render(){
+  pendingRender=false;
+  let html='';
+  switch(V.v){
+    case 'mhc': html=vMhc(); break;
+    case 'cat': html=vCat(); break;
+    case 'wiz': html=vWiz(); break;
+    case 'sheet': html=vSheet(); break;
+    case 'reg': html=vReg(); break;
+    default: html=vHome();
+  }
+  $app.innerHTML=html+vConfirm();
+}
+function softRender(){
+  const ae=document.activeElement;
+  if(ae && (ae.tagName==='INPUT'||ae.tagName==='TEXTAREA')){ pendingRender=true; return; }
+  render();
+}
+document.addEventListener('focusout',()=>{ setTimeout(()=>{ if(pendingRender) softRender(); },50); });
+function go(v){ V=v; render(); window.scrollTo(0,0); }
+
+/* ===================== AÇÕES ===================== */
+function curInsp(){ return S.insps[V.id]; }
+function goMhc(){
+  const el=document.getElementById('mhcIn'); const m=normMhc(el&&el.value);
+  if(!m){ toast('Digite o número do MHC, ex.: 04'); el&&el.focus(); return; }
+  go({v:'mhc',mhc:m});
+}
+function back(){
+  if(V.v==='mhc') go({v:'home'});
+  else if(V.v==='cat'){ draft=null; go({v:'mhc',mhc:V.mhc}); }
+  else if(V.v==='wiz'||V.v==='sheet'||V.v==='reg'){ const i=curInsp(); go(i?{v:'cat',mhc:i.mhc,cat:i.cat}:{v:'home'}); }
+  else go({v:'home'});
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return;
+  const act=b.dataset.act;
+  if(act==='back') return back();
+  if(act==='goMhc') return goMhc();
+  if(act==='openMhc') return go({v:'mhc',mhc:b.dataset.m});
+  if(act==='openCat'){ draft=null; return go({v:'cat',mhc:V.mhc,cat:b.dataset.c}); }
+  if(act==='newDraft'){
+    draft={escopo:'D',oficina:S.prof.oficina||'',patio:S.prof.patio||'',mant:JSON.parse(JSON.stringify(S.prof.mant||[{},{}]))};
+    while(draft.mant.length<2) draft.mant.push({nome:'',mat:'',turma:''});
+    return render();
+  }
+  if(act==='cancelDraft'){ draft=null; return render(); }
+  if(act==='esc'){ draft.escopo=b.dataset.v; return render(); }
+  if(act==='start'){
+    const id=newId();
+    const insp={id,mhc:V.mhc,cat:V.cat,escopo:draft.escopo,oficina:draft.oficina.trim(),patio:draft.patio.trim(),mant:draft.mant.map(m=>({nome:(m.nome||'').trim(),mat:(m.mat||'').trim(),turma:(m.turma||'').trim()})),inicio:Date.now(),fim:0,ans:{},cp:{}};
+    S.insps[id]=insp; S.prof.oficina=insp.oficina; S.prof.patio=insp.patio; S.prof.mant=insp.mant; touchProf(); touch(insp);
+    draft=null; return go({v:'wiz',id,pos:0});
+  }
+  if(act==='wiz'){
+    const i=S.insps[b.dataset.id]; if(!i) return;
+    const it=scoped(i); let pos=it.findIndex(x=>!(i.ans[x.key]||{}).r); if(pos<0) pos=it.length;
+    return go({v:'wiz',id:i.id,pos});
+  }
+  if(act==='sheet') return go({v:'sheet',id:b.dataset.id});
+  if(act==='reg') return go({v:'reg',id:b.dataset.id});
+  if(act==='sugR'){
+    const s=((window.__sugR||{})[b.dataset.k]||[])[+b.dataset.i]; if(!s) return;
+    const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
+    a.falha=s.f; a.acao=s.a; a.mat=s.m; touch(insp);
+    const y=window.scrollY; render(); window.scrollTo(0,y); return;
+  }
+  if(act==='goto'){ const id=V.id; return go({v:'wiz',id,pos:+b.dataset.p}); }
+  if(act==='ans'){
+    const insp=curInsp(), it=scoped(insp)[V.pos], r=b.dataset.r;
+    const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; touch(insp);
+    V.pos++; render(); window.scrollTo(0,0);
+    return;
+  }
+  if(act==='sug'){
+    const s=(window.__sug||[])[+b.dataset.i]; if(!s) return;
+    const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key];
+    a.falha=s.f; a.acao=s.a; a.mat=s.m; touch(insp); render();
+    const f=document.getElementById('f-falha'); if(f) f.scrollIntoView({block:'center'});
+    return;
+  }
+  if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='prev'){ V.pos=Math.max(0,V.pos-1); render(); window.scrollTo(0,0); return; }
+  if(act==='finish'){ const i=curInsp(); i.fim=Date.now(); touch(i); toast('Inspeção finalizada'); return go({v:'sheet',id:i.id}); }
+  if(act==='cp'){ const i=curInsp(); i.cp=i.cp||{}; i.cp[b.dataset.k]=!i.cp[b.dataset.k]; touch(i); return render(); }
+  if(act==='copy'){
+    const txt=textOf(curInsp());
+    const ok=()=>toast('Resumo copiado. Cole no WhatsApp ou nas notas.');
+    try{ navigator.clipboard.writeText(txt).then(ok,()=>{ V.copyText=txt; render(); toast('Selecione o texto abaixo e copie'); }); }
+    catch(err){ V.copyText=txt; render(); }
+    return;
+  }
+  if(act==='exp'){
+    const data=JSON.stringify({app:'checklist-mhc80',v:1,salvo:Date.now(),insps:S.insps,prof:S.prof});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([data],{type:'application/json'}));
+    const d=new Date(); a.download=`checklist-mhc80-${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}.json`;
+    document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+    toast('Cópia salva em Downloads'); return;
+  }
+  if(act==='imp'){ document.getElementById('impFile').click(); return; }
+  if(act==='askDel'){ V.confirm=b.dataset.id; return render(); }
+  if(act==='noDel'){ V.confirm=null; return render(); }
+  if(act==='del'){ const id=V.confirm; delete S.insps[id]; V.confirm=null; saveLocal(); dirty.add(id); schedule(); toast('Inspeção apagada'); return render(); }
+});
+document.addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.id==='mhcIn') goMhc(); });
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.dataset.f && V.v==='wiz'){
+    const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key]; if(!a) return;
+    a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; touch(insp); return;
+  }
+  if(t.dataset.rk && V.v==='reg'){
+    const insp=curInsp(), a=insp.ans[t.dataset.rk]; if(!a) return;
+    a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; touch(insp); return;
+  }
+  if(draft && t.dataset.d){ draft[t.dataset.d]=t.value; return; }
+  if(draft && t.dataset.m!==undefined){ draft.mant[+t.dataset.m][t.dataset.k]=t.value; return; }
+});
+document.addEventListener('change',e=>{ const t=e.target;
+  if(t.id==='impFile' && t.files && t.files[0]){
+    t.files[0].text().then(txt=>{ const d=JSON.parse(txt); if(!d||d.app!=='checklist-mhc80'||!d.insps) throw 0;
+      let n=0; Object.values(d.insps).forEach(r=>{ const l=S.insps[r.id]; if(!l||(r.upd||0)>(l.upd||0)){ S.insps[r.id]=r; n++; } });
+      if(d.prof && (d.prof.upd||0)>(S.prof.upd||0)) S.prof=d.prof;
+      saveLocal(); render(); toast(n+' inspeção(ões) restaurada(s)'); }).catch(()=>toast('Arquivo inválido. Escolha uma cópia salva por este app.'));
+    t.value=''; return;
+  } if(t.type==='checkbox'&&t.dataset.f&&V.v==='wiz'){ const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key]; if(a){ a[t.dataset.f]=t.checked; touch(insp);} } });
+
+/* ===================== START ===================== */
+loadLocal();
+render();
+initCloud();
+</script>
+</body>
+</html>

@@ -1671,6 +1671,7 @@ async function uploadFiles(files) {
 const TAB_SCREENS = ['home', 'conv', 'check'];
 document.querySelectorAll('#tabs button').forEach(b => (b.onclick = () => {
   const t = b.dataset.tab;
+  if (t === 'check') { location.href = 'checklist.html'; return; } // checklist completo por MHC
   if (document.querySelector('.screen.active')?.id === t) return;
   history.replaceState({ s: t }, ''); route({ s: t });
 }));
