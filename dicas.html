@@ -10,8 +10,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<script>/* aba em teste: só o administrador */
-try{ var a=JSON.parse(localStorage.getItem('manuais.auth')||'{}'); if(!a||!a.token||!a.admin) location.replace('./'); }catch(e){ location.replace('./'); }</script>
+<script>/* só abre para quem já entrou com o código no app */
+try{ var a=JSON.parse(localStorage.getItem('manuais.auth')||'{}'); if(!a||!a.token) location.replace('./'); }catch(e){ location.replace('./'); }</script>
 <title>Dicas de procedimentos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -165,7 +165,8 @@ textarea.copy{width:100%;min-height:200px;font-family:ui-monospace,monospace;fon
 <div id="app"></div>
 <script>
 /* =====================================================================
-   Dicas de procedimentos — fase de teste (só o admin vê)
+   Dicas de procedimentos — compartilhadas com todos que usam o app
+   (cada um edita/apaga só o que criou; o admin pode tudo)
    Cada dica: título, máquina, sistema, tipo, texto, fotos e comentários.
    Fotos são reduzidas no celular (máx. 1600 px, JPEG) antes de enviar.
    ===================================================================== */
@@ -175,6 +176,8 @@ const SISS=['Mecânico','Truque','Pneumático','Hidráulico','Elétrico','Geral'
 const TIPOS=[['proc','Procedimento'],['anot','Anotação'],['evid','Evidência']];
 const TIPO=Object.fromEntries(TIPOS);
 const KC='dicas.cache.v1';
+const MYCODE=String(AUTH.token||'').split('.')[0];
+const mine=o=>!!AUTH.admin||(!!o&&o.byCode===MYCODE);
 let TIPS=(()=>{ try{ return JSON.parse(localStorage.getItem(KC)||'[]'); }catch(e){ return []; } })();
 let V={v:'list'}, Q='', F='', D=null, CM=null, loadErr='';
 const IMG=new Map(); // pid -> objectURL
@@ -225,7 +228,7 @@ async function uploadNew(target){
 }
 
 /* ---------------- telas ---------------- */
-function topBar(t,back){ return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:`<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a>`}<div class="ttl">${t}</div><span class="sync">Teste · só admin</span></header>`; }
+function topBar(t,back){ return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:`<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a>`}<div class="ttl">${t}</div><span class="sync">${h(AUTH.name||'')}</span></header>`; }
 const pill=t=>`<span class="pill p-${h(t)}">${h(TIPO[t]||'')}</span>`;
 const thumbs=(fotos,del)=>fotos.length?`<div class="thumbs">${fotos.map(pid=>`<button class="ph" ${del?'':`data-act="zoom" data-pid="${h(pid)}"`} aria-label="Foto"><img data-pid="${h(pid)}" alt="">${del?`<span class="x" role="button" data-act="${del}" data-pid="${h(pid)}" aria-label="Tirar foto">×</span>`:''}</button>`).join('')}</div>`:'';
 const fotoBtns=(cam,gal)=>`<div class="row"><button class="btn alt" data-act="pick" data-in="${cam}">📷 Câmera</button><button class="btn alt" data-act="pick" data-in="${gal}">🖼 Galeria</button></div>
@@ -268,10 +271,10 @@ function vTip(){
     <span class="small muted">${h(t.by||'')} · ${fmt(t.created||t.upd)}${t.upd&&t.created&&t.upd-t.created>60000?' · atualizada '+fmt(t.upd):''}</span>
     ${t.texto?`<div class="card texto">${h(t.texto)}</div>`:''}
     ${thumbs(t.fotos||[])}
-    <div class="row"><button class="btn alt" data-act="edit">Editar</button><button class="btn ghost" data-act="askDelTip">Apagar</button></div>
+    ${mine(t)?`<div class="row"><button class="btn alt" data-act="edit">Editar</button><button class="btn ghost" data-act="askDelTip">Apagar</button></div>`:''}
     <h3>Comentários (${(t.comments||[]).length})</h3>
     ${(t.comments||[]).map(cm=>`<div class="cm"><span class="small muted"><b>${h(cm.by)}</b> · ${fmt(cm.at)}</span>${cm.texto?`<div class="texto">${h(cm.texto)}</div>`:''}${thumbs(cm.fotos||[])}
-      <button class="btn ghost" style="align-self:flex-start;min-height:34px;padding:4px 10px" data-act="delCm" data-cid="${h(cm.id)}">Apagar comentário</button></div>`).join('')||'<p class="muted" style="margin:0">Nenhum comentário ainda.</p>'}
+      ${mine(cm)?`<button class="btn ghost" style="align-self:flex-start;min-height:34px;padding:4px 10px" data-act="delCm" data-cid="${h(cm.id)}">Apagar comentário</button>`:''}</div>`).join('')||'<p class="muted" style="margin:0">Nenhum comentário ainda.</p>'}
     <section class="card stack" style="gap:8px">
       <div class="fld"><label for="c-x">Seu comentário</label><textarea id="c-x" data-c="texto" placeholder="Ajude quem vai fazer, complete a dica ou registre uma evidência">${h(c.texto)}</textarea></div>
       ${thumbs(c.fotos,'rmCFoto')}${fotoBtns('camC','galC')}
@@ -344,6 +347,8 @@ document.addEventListener('change',e=>{
   if(t.id==='camC'||t.id==='galC'){ CM=CM||{texto:'',fotos:[],novas:[]}; addFiles(files,CM,V.id); }
 });
 render(); load();
+// novidades da equipe: atualiza a lista a cada 30 s (sem atrapalhar quem está digitando)
+setInterval(()=>{ const ae=document.activeElement; if(document.visibilityState==='visible'&&!(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'))&&!V.ask&&!V.zoom&&V.v!=='form') load(); },30000);
 </script>
 </body>
 </html>

@@ -173,9 +173,9 @@ export async function onRequest(context) {
       return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, no-store' } });
     }
 
-    // ---------------- dicas de procedimentos (fase de teste: só o admin) ----------------
+    // ---------------- dicas de procedimentos (todos que usam o app) ----------------
+    // qualquer pessoa cria dicas e comenta; editar/apagar só o autor ou o admin
     if (path[0] === 'tips') {
-      if (!who.admin && !who.entry?.tips) return fail('A aba Dicas ainda está em teste.', 403);
       if (!env.CK) return fail('Servidor sem o banco de dicas (CK).', 500);
       const store = env.CK.get(env.CK.idFromName('dicas'));
       const sid = v => String(v || '').replace(/[^a-z0-9-]/gi, '').slice(0, 60);
@@ -196,24 +196,32 @@ export async function onRequest(context) {
       }
       const body = await request.json().catch(() => ({}));
       const id = sid(body.id);
+      const mine = o => who.admin || (o && o.byCode === who.code);
       if (path[1] === 'save' && method === 'POST') {
         if (!id || !txt(body.titulo, 1).trim()) return fail('Dê um título para a dica.');
+        const old = await store.tipGet(id);
+        if (old && !mine(old)) return fail('Só quem criou a dica (ou o admin) pode editar.', 403);
         const t = await store.tipSave({ id, titulo: txt(body.titulo, 140), maq: txt(body.maq, 40), sis: txt(body.sis, 30), tipo: txt(body.tipo, 20),
-          texto: txt(body.texto, 20000), fotos: (body.fotos || []).map(sid).filter(x => x.startsWith(id + '-')).slice(0, 30), by: who.name });
+          texto: txt(body.texto, 20000), fotos: (body.fotos || []).map(sid).filter(x => x.startsWith(id + '-')).slice(0, 30), by: who.name, byCode: who.code });
         return json({ tip: t });
       }
       if (path[1] === 'comment' && method === 'POST') {
-        const c = { id: sid(body.cid) || String(Date.now()), by: who.name, at: Date.now(), texto: txt(body.texto, 5000),
+        const c = { id: sid(body.cid) || String(Date.now()), by: who.name, byCode: who.code, at: Date.now(), texto: txt(body.texto, 5000),
           fotos: (body.fotos || []).map(sid).filter(x => x.startsWith(id + '-')).slice(0, 10) };
         if (!c.texto.trim() && !c.fotos.length) return fail('Escreva algo ou mande uma foto.');
         const t = await store.tipComment(id, c);
         return t ? json({ tip: t }) : fail('Dica não encontrada.', 404);
       }
       if (path[1] === 'uncomment' && method === 'POST') {
+        const cur = await store.tipGet(id);
+        if (!mine((cur?.comments || []).find(x => x.id === sid(body.cid)))) return fail('Só quem comentou (ou o admin) pode apagar.', 403);
         const t = await store.tipUncomment(id, sid(body.cid));
         return t ? json({ tip: t }) : fail('Dica não encontrada.', 404);
       }
-      if (path[1] === 'delete' && method === 'POST') { await store.tipDel(id); return json({ ok: true }); }
+      if (path[1] === 'delete' && method === 'POST') {
+        if (!mine(await store.tipGet(id))) return fail('Só quem criou a dica (ou o admin) pode apagar.', 403);
+        await store.tipDel(id); return json({ ok: true });
+      }
       return fail('Rota desconhecida', 404);
     }
 

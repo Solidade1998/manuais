@@ -21,7 +21,7 @@ export class CkStore extends DurableObject {
   tipGet(id) { const r = this.sql.exec('SELECT data FROM tip WHERE id = ?', id).toArray()[0]; return r ? JSON.parse(r.data) : null; }
   tipSave(tip) {
     const old = this.tipGet(tip.id);
-    const t = { ...tip, comments: old?.comments || [], created: old?.created || Date.now(), by: old?.by || tip.by, upd: Date.now() };
+    const t = { ...tip, comments: old?.comments || [], created: old?.created || Date.now(), by: old?.by || tip.by, byCode: old?.byCode || tip.byCode, upd: Date.now() };
     this.sql.exec('INSERT OR REPLACE INTO tip (id, data, upd) VALUES (?, ?, ?)', t.id, JSON.stringify(t), t.upd);
     // fotos tiradas da dica são apagadas
     const keep = new Set([...(t.fotos || []), ...t.comments.flatMap(c => c.fotos || [])]);

@@ -1,6 +1,6 @@
 // Guarda o app no celular para funcionar sem internet.
 // Ao mudar qualquer arquivo do app, aumente a versão abaixo.
-const VERSION = 'manuais-v3.10.0';
+const VERSION = 'manuais-v3.11.0';
 const CORE = [
   './', 'index.html', 'checklist', 'dicas', 'style.css', 'app.js', 'manifest.webmanifest',
   'lib/pdf.min.mjs', 'lib/pdf.worker.min.mjs',
