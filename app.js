@@ -4,7 +4,7 @@
 // =====================================================================
 import * as pdfjsLib from './lib/pdf.min.mjs';
 
-const APP_VERSION = '3.3.0';
+const APP_VERSION = '3.3.1';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.mjs';
 const LIB = new URL('lib/', location.href).href;
 const PDF_OPTS = {
@@ -317,12 +317,25 @@ async function api(path, opts = {}) {
   if (AUTH.token) headers.authorization = 'Bearer ' + AUTH.token;
   let body = opts.body;
   if (opts.json !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(opts.json); }
-  const r = await fetch('api/' + path, { method: opts.method || (body ? 'POST' : 'GET'), headers, body, cache: 'no-store' });
+  const r = await fetch('api/' + path, { method: opts.method || (body ? 'POST' : 'GET'), headers, body, cache: 'no-store', signal: opts.signal });
   if (opts.raw && r.ok) return r;
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.error || 'Erro ' + r.status); e.status = r.status; e.data = data; throw e; }
   return data;
 }
+
+// baixa um pedaço de manual, tentando de novo se a conexão cair no meio
+async function fetchPart(rid, sha, i) {
+  let last;
+  for (let t = 0; t < 3; t++) {
+    const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 90000); // 90 s por pedaço
+    try { const res = await api(`file/${rid}/${sha}/${i}`, { raw: true, signal: ac.signal }); return await res.blob(); }
+    catch (e) { last = e.name === 'AbortError' ? Object.assign(new Error('demorou demais (sinal fraco?)'), {}) : e; if (e.status && e.status < 500) break; await sleep(1200 * (t + 1)); }
+    finally { clearTimeout(timer); }
+  }
+  throw last;
+}
+const errTxt = e => e?.status ? `${e.message} (erro ${e.status})` : `conexão interrompida${e?.message ? ' — ' + e.message : ''}`;
 
 function showLogin(msg, isError) {
   show('login');
@@ -476,8 +489,7 @@ async function sync(manual) {
       const chunks = [];
       for (let i = 0; i < r.parts; i++) {
         syncBar(`Baixando manuais ${k + 1} de ${todo.length} · ${fmtMB(done)} de ${fmtMB(total)}`, done / total);
-        const res = await api(`file/${r.rid}/${r.sha}/${i}`, { raw: true });
-        const b = await res.blob(); chunks.push(b); done += b.size;
+        const b = await fetchPart(r.rid, r.sha, i); chunks.push(b); done += b.size;
       }
       syncBar(`Preparando ${r.name}…`, done / total);
       const old = byRid.get(r.rid);
@@ -488,7 +500,7 @@ async function sync(manual) {
     toast(todo.length === 1 ? 'Manual atualizado' : `${todo.length} manuais baixados`);
   } catch (e) {
     console.error('sync', e);
-    toast('Download interrompido: ' + (e.status ? e.message : 'sem internet') + '. Toque em ⟳ para continuar.', 6000);
+    toast('Download interrompido: ' + errTxt(e) + '. Toque em ⟳ para continuar.', 7000);
   } finally {
     syncing = false; syncBar(null);
     refreshCloud(lastRemote);
@@ -521,15 +533,20 @@ function refreshCloud(remote) {
 }
 async function openCloud(d, then) {
   if (!S.cloudBlobs.has(d.id)) {
-    if (navigator.onLine === false) { toast('Sem internet. Este manual está só na nuvem — baixe-o para usar offline.', 4500); return; }
     const chunks = []; let got = 0;
     try {
       for (let i = 0; i < d.parts; i++) {
         toast(`☁ Abrindo da nuvem… ${Math.round((got / (d.size || 1)) * 100)}%`, 0);
-        const res = await api(`file/${d.rid}/${d.sha}/${i}`, { raw: true });
-        const b = await res.blob(); chunks.push(b); got += b.size;
+        const b = await fetchPart(d.rid, d.sha, i); chunks.push(b); got += b.size;
       }
-    } catch (e) { toast('Não deu para abrir pela nuvem: ' + (e.status ? e.message : 'sem internet'), 4500); return; }
+    } catch (e) {
+      console.error('nuvem', e);
+      openSheet(el('div', {}, el('h4', {}, 'Não deu para abrir pela nuvem'),
+        el('p', { class: 'muted' }, `${d.name} (${fmtMB(d.size)})`),
+        el('div', { class: 'note' }, 'Motivo: ' + errTxt(e)),
+        el('div', { class: 'acts' }, el('button', { class: 'ok', onclick: () => { closeSheet(); openCloud(d, then); } }, 'Tentar de novo'), el('button', { onclick: closeSheet }, 'Fechar'))));
+      $('#toast').hidden = true; return;
+    }
     // guarda na memória no máximo 2 manuais da nuvem
     while (S.cloudBlobs.size >= 2) {
       const k = S.cloudBlobs.keys().next().value; S.cloudBlobs.delete(k);
