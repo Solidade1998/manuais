@@ -1504,7 +1504,8 @@ function inviteText(c) {
     `2️⃣ Instale o app:\n   • Android (Chrome): menu ⋮ → *Adicionar à tela inicial*\n   • iPhone (Safari): Compartilhar → *Adicionar à Tela de Início*\n\n` +
     `3️⃣ Abra o app pelo ícone. Se pedir o código, copie esta mensagem inteira e toque em *📋 Colar código*.\n\n` +
     `Seu código: ${c.pretty}\n\n` +
-    `Os manuais baixam sozinhos (use Wi-Fi). O código é pessoal e funciona em até ${c.max} celular${c.max > 1 ? 'es' : ''}. Não repasse.`;
+    `4️⃣ Na primeira vez, o app mostra a lista de manuais: marque só os que quer baixar no celular (use Wi-Fi). Os desmarcados ficam na nuvem e abrem com internet.\n\n` +
+    `O código é pessoal e funciona em até ${c.max} celular${c.max > 1 ? 'es' : ''}. Não repasse.`;
 }
 async function copyText(t) {
   try { await navigator.clipboard.writeText(t); toast('Copiado'); }
