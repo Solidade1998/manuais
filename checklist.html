@@ -247,6 +247,11 @@ const CATS = [
   ]}
  ]}
 ];
+CATS.push({ id:'ele', nome:'Elétrico', doc:'Sistema Elétrico', esc:['S','M'], conds:[ { c:LIG, itens:[] } ] }); // itens: aguardando as fotos das páginas
+/* Função do código: mec = mecânico, ele = eletricista, all = todos */
+const FUNC = (()=>{ try{ const a=JSON.parse(localStorage.getItem('manuais.auth')||'{}')||{}; return a.admin?'all':(a.func||'mec'); }catch(e){ return 'mec'; } })();
+const allowed = id => FUNC==='all' || (FUNC==='ele' ? id==='ele' : id!=='ele');
+const hasItems = c => c.conds.some(cd=>cd.itens.length);
 const CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
 
 /* Sugestões para "Não Ok" (tiradas dos registros de tráfego das fotos + exemplo do óleo) */
@@ -413,21 +418,21 @@ function cardInsp(i){
 
 function vMhc(){
   const m=V.mhc, today=dayKey(Date.now()), tpl=V.from&&S.insps[V.from];
-  const cards=CATS.map(c=>{
+  const cards=CATS.filter(c=>allowed(c.id)).map(c=>{
+    if(!hasItems(c)) return `<button class="catcard" disabled><span class="nm">${c.nome}</span><span class="small muted">Itens ainda não cadastrados no app.</span></button>`;
     const all=inspsFor(m,c.id), hoje=all.filter(i=>dayKey(i.inicio)===today), last=all[0];
     const feito=hoje.find(i=>i.fim), andamento=hoje.find(i=>!i.fim)||all.find(i=>!i.fim);
     let status, info='', b='';
     if(feito){ const st=stats(feito); status=`<span class="pill p-ok">Feito hoje</span>`; info=`<span class="small muted">${ESC[feito.escopo]} · ${fmtH(feito.inicio)}${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}</span>`; b=bar(st); }
     else if(andamento){ const st=stats(andamento); status=`<span class="pill p-open">Em andamento ${st.done}/${st.tot}</span>`; info=`<span class="small muted">Início ${fmt(andamento.inicio)} · ${ESC[andamento.escopo]}</span>`; b=bar(st); }
     else { status=`<span class="pill p-nok">Falta hoje</span>`; info=`<span class="small muted">${last?'Último: '+fmtD(last.inicio)+' · '+ESC[last.escopo]:'Nenhuma inspeção ainda'}</span>`; }
-    const quick=tpl&&!feito&&!andamento;
+    const quick=tpl&&!feito&&!andamento&&(c.esc||['D','S','M']).includes(tpl.escopo);
     const act=andamento&&tpl?`data-act="wiz" data-id="${andamento.id}"`:quick?`data-act="quick" data-c="${c.id}"`:`data-act="openCat" data-c="${c.id}"`;
     return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}${quick?`<span class="small" style="font-weight:700">Toque para começar agora ›</span>`:''}</button>`;
   }).join('');
   return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
     ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
     ${cards}
-    <button class="catcard" disabled><span class="nm">Elétrico</span><span class="small muted">Em breve</span></button>
     <button class="btn ghost full" data-act="browse">Histórico por data</button></div>`;
 }
 
@@ -441,7 +446,7 @@ function vCat(){
     html+=`<section class="card stack">
       <h3>Nova inspeção · ${c.nome}</h3>
       <div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">Escopo a ser executado</span>
-        <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="esc" data-v="${k}" class="${d.escopo===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
+        <div class="seg" role="group" aria-label="Escopo">${(c.esc||['D','S','M']).map(k=>`<button data-act="esc" data-v="${k}" class="${d.escopo===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
         <span class="small muted">${d.escopo==='D'?'Só itens diários.':d.escopo==='S'?'Itens diários e semanais.':'Todos os itens (diários, semanais e mensais).'} ${scoped({cat:V.cat,escopo:d.escopo}).length} itens.</span></div>
       <div class="row"><div class="fld"><label for="d-of">Oficina</label><input id="d-of" data-d="oficina" value="${h(d.oficina)}" placeholder="GIU"></div>
         <div class="fld"><label for="d-pa">Pátio</label><input id="d-pa" data-d="patio" value="${h(d.patio)}" placeholder="P2114"></div></div>
@@ -693,7 +698,7 @@ document.addEventListener('click',e=>{
   if(act==='openMhc') return go({v:'mhc',mhc:b.dataset.m});
   if(act==='openCat'){ draft=null; return go({v:'cat',mhc:V.mhc,cat:b.dataset.c}); }
   if(act==='newDraft'){
-    draft={escopo:'D',oficina:S.prof.oficina||'',patio:S.prof.patio||'',mant:JSON.parse(JSON.stringify(S.prof.mant||[{},{}]))};
+    draft={escopo:(CAT[V.cat].esc||['D'])[0],oficina:S.prof.oficina||'',patio:S.prof.patio||'',mant:JSON.parse(JSON.stringify(S.prof.mant||[{},{}]))};
     while(draft.mant.length<2) draft.mant.push({nome:'',mat:'',turma:''});
     return render();
   }

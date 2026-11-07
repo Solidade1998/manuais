@@ -390,7 +390,7 @@ $('#loginBtn').onclick = async () => {
   const btn = $('#loginBtn'); btn.disabled = true; btn.textContent = 'Conferindo…'; $('#loginErr').hidden = true;
   try {
     const r = await api('login', { json: { code, deviceId: deviceId() } });
-    AUTH = { token: r.token, name: r.name, admin: r.admin, issued: Date.now(), lastOk: Date.now() };
+    AUTH = { token: r.token, name: r.name, admin: r.admin, func: r.func || 'mec', issued: Date.now(), lastOk: Date.now() };
     lsSet(LS_AUTH, AUTH); lsSet('manuais.pending', null);
     $('#loginCode').value = '';
     await startApp();
@@ -427,7 +427,7 @@ async function wipeAll(reason) {
 async function checkAccess() {
   try {
     const r = await api('me');
-    AUTH.lastOk = Date.now(); AUTH.admin = r.admin; AUTH.name = r.name; AUTH.storage = r.storage; lsSet(LS_AUTH, AUTH);
+    AUTH.lastOk = Date.now(); AUTH.admin = r.admin; AUTH.name = r.name; AUTH.func = r.func || 'mec'; AUTH.storage = r.storage; lsSet(LS_AUTH, AUTH);
     $('#btnAdmin').hidden = !AUTH.admin;
     return true;
   } catch (e) {
@@ -1560,14 +1560,17 @@ async function renderAdmin() {
     el('br'), AUTH.storage === 'R2' ? 'Arquivos guardados no R2 (até 10 GB grátis) ✔' : 'Arquivos guardados no KV (limite de 1 GB) — ative o R2 para caber tudo'));
 }
 
+const FUNCS = [['mec', 'Mecânico'], ['ele', 'Eletricista'], ['all', 'Todos']];
 function newCodeSheet() {
   const name = el('input', { placeholder: 'ex.: João – turno B' });
   let max = 1;
   const seg = el('div', { class: 'seg' }, [1, 2, 3].map(n => el('button', { class: n === 1 ? 'on' : '', onclick: e => { max = n; seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.target)); } }, n + (n > 1 ? ' celulares' : ' celular'))));
+  let func = 'mec';
+  const fseg = el('div', { class: 'seg' }, FUNCS.map(([k, t]) => el('button', { class: k === func ? 'on' : '', onclick: e => { func = k; fseg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.target)); } }, t)));
   const create = async () => {
     if (!name.value.trim()) return name.focus();
     try {
-      const c = await api('admin/codes', { json: { name: name.value.trim(), max } });
+      const c = await api('admin/codes', { json: { name: name.value.trim(), max, func } });
       await renderAdmin(); codeSheet(c, true);
     } catch (e) { toast(e.status ? e.message : 'Sem internet', 4000); }
   };
@@ -1575,6 +1578,8 @@ function newCodeSheet() {
   openSheet(el('div', {}, el('h4', {}, 'Novo acesso'),
     el('label', {}, 'Nome da pessoa'), name,
     el('label', {}, 'Em quantos celulares o código pode funcionar'), seg,
+    el('label', {}, 'Função (libera os checklists dela)'), fseg,
+    el('p', { class: 'muted small', style: 'margin:4px 0 0' }, 'Mecânico: Mecânico, Truque, Pneumático e Hidráulico · Eletricista: só Elétrico · Todos: todos.'),
     el('div', { class: 'acts' }, el('button', { class: 'ok', onclick: create }, 'Criar código'), el('button', { onclick: closeSheet }, 'Cancelar'))));
   setTimeout(() => name.focus(), 50);
 }
@@ -1603,6 +1608,8 @@ function codeSheet(c, fresh) {
       el('label', {}, 'Tentativas bloqueadas (outro celular tentou usar o código)'),
       ...(c.attempts || []).slice(0, 5).map(a => el('div', { class: 'muted small' }, `⚠ ${new Date(a.at).toLocaleString('pt-BR')} · ${a.label}`))) : null,
     el('label', {}, 'Limite de celulares'), seg,
+    el('label', {}, 'Função (libera os checklists dela)'),
+    el('div', { class: 'seg' }, FUNCS.map(([k, t]) => el('button', { class: k === (c.func || 'mec') ? 'on' : '', onclick: () => act('setFunc', { func: k }) }, t))),
     el('div', { class: 'acts' },
       c.blocked
         ? el('button', { class: 'ok', onclick: () => act('unblock') }, 'Desbloquear')

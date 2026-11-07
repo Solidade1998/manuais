@@ -100,7 +100,7 @@ export async function onRequest(context) {
       if (!code || dev.length < 8) return fail('Digite o código.');
       const ua = request.headers.get('user-agent') || '';
       if (sameText(code, cleanCode(env.ADMIN_CODE))) {
-        return json({ token: `ADMIN.${dev}.${await hmac(env.SECRET, 'ADMIN|' + dev)}`, name: 'Administrador', admin: true });
+        return json({ token: `ADMIN.${dev}.${await hmac(env.SECRET, 'ADMIN|' + dev)}`, name: 'Administrador', admin: true, func: 'all' });
       }
       const e = await getEntry(env, code);
       if (!e) { await new Promise(r => setTimeout(r, 700)); return fail('Código não encontrado. Confira com o responsável.', 403); }
@@ -115,7 +115,7 @@ export async function onRequest(context) {
         e.devices[dev] = { label: String(body.label || deviceLabel(ua)).slice(0, 60), first: Date.now(), last: Date.now() };
         await putEntry(env, code, e);
       }
-      return json({ token: `${code}.${dev}.${await hmac(env.SECRET, code + '|' + dev)}`, name: e.name, admin: false });
+      return json({ token: `${code}.${dev}.${await hmac(env.SECRET, code + '|' + dev)}`, name: e.name, admin: false, func: e.func || 'mec' });
     }
 
     // daqui para baixo, só com token válido
@@ -128,7 +128,7 @@ export async function onRequest(context) {
         const d = who.entry.devices[who.dev];
         if (Date.now() - (d.last || 0) > DAY / 4) { d.last = Date.now(); await putEntry(env, who.code, who.entry); }
       }
-      return json({ ok: true, name: who.name, admin: !!who.admin, storage: env.FILES ? 'R2' : 'KV' });
+      return json({ ok: true, name: who.name, admin: !!who.admin, func: who.admin ? 'all' : (who.entry.func || 'mec'), storage: env.FILES ? 'R2' : 'KV' });
     }
 
     // ---------------- lista de manuais ----------------
@@ -214,7 +214,8 @@ export async function onRequest(context) {
       const max = Math.min(Math.max(parseInt(body.max, 10) || 1, 1), 5);
       let code;
       do { code = newCode(); } while (await getEntry(env, code));
-      const e = { name, max, created: Date.now(), blocked: false, devices: {}, attempts: [] };
+      const func = ['mec','ele','all'].includes(body.func) ? body.func : 'mec'; // função: mec = mecânico, ele = eletricista, all = todos os checklists
+      const e = { name, max, func, created: Date.now(), blocked: false, devices: {}, attempts: [] };
       await putEntry(env, code, e);
       return json({ code, pretty: fmtCode(code), ...e });
     }
@@ -228,6 +229,7 @@ export async function onRequest(context) {
         case 'unblock': e.blocked = false; break;
         case 'reset': e.devices = {}; e.attempts = []; break;
         case 'removeDevice': delete e.devices[body.deviceId]; break;
+        case 'setFunc': e.func = ['mec','ele','all'].includes(body.func) ? body.func : 'mec'; break;
         case 'setMax': e.max = Math.min(Math.max(parseInt(body.max, 10) || 1, 1), 5); break;
         case 'rename': e.name = String(body.name || e.name).trim().slice(0, 60); break;
         case 'delete': await env.DB.delete('code:' + code); return json({ ok: true, deleted: true });
