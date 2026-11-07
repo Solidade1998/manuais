@@ -20,10 +20,12 @@
 <section id="home" class="screen active">
   <header class="topbar">
     <h1>Manuais</h1>
+    <button id="btnPick" class="btn-ghost" aria-label="Escolher manuais">📥</button>
     <button id="btnSync" class="btn-ghost" aria-label="Atualizar manuais">⟳</button>
     <button id="btnAdmin" class="btn-accent" hidden>Painel</button>
     <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
   </header>
+  <nav id="brands" class="brands" hidden></nav>
   <div class="searchbox">
     <span class="icon">🔍</span>
     <input id="search" type="search" placeholder="Buscar em todos os manuais…" autocomplete="off" enterkeyhint="search">
@@ -45,6 +47,39 @@
     <button id="loginBtn" class="btn-accent big">Entrar</button>
     <p id="loginErr" class="err" hidden></p>
     <p class="muted small">O código é pessoal. Não repasse para outras pessoas.</p>
+  </div>
+</section>
+
+<!-- ============ CONVERSÃO ============ -->
+<section id="conv" class="screen">
+  <header class="topbar"><h1>Conversão</h1></header>
+  <div id="convBody" class="body"></div>
+</section>
+
+<!-- ============ CHECKLIST ============ -->
+<section id="check" class="screen">
+  <header class="topbar"><h1>Checklist</h1></header>
+  <div id="checkBody" class="body"></div>
+</section>
+<section id="checkrun" class="screen">
+  <header class="topbar">
+    <button class="back" data-back aria-label="Voltar">‹</button>
+    <div class="vtitle" style="flex:1;min-width:0"><div id="crTitle" class="title"></div><div id="crSub" class="sub muted small"></div></div>
+  </header>
+  <div id="crBody" class="body" style="padding-bottom:100px"></div>
+  <div class="pickbar"><div id="crSum" class="muted small"></div><button id="crDone" class="btn-accent big">Ver resumo para a folha</button></div>
+</section>
+
+<!-- ============ ESCOLHER MANUAIS ============ -->
+<section id="pick" class="screen">
+  <header class="topbar">
+    <button class="back" data-back aria-label="Voltar">‹</button>
+    <h2 class="title">Escolher manuais</h2>
+  </header>
+  <div id="pickBody" class="body" style="padding-bottom:110px"></div>
+  <div class="pickbar">
+    <div id="pickSum" class="muted small"></div>
+    <button id="pickSave" class="btn-accent big">Salvar e baixar</button>
   </div>
 </section>
 
@@ -94,6 +129,13 @@
     <button id="goPage">Pág.</button>
   </div>
 </section>
+
+<!-- ============ ABAS ============ -->
+<nav id="tabs" class="tabs" hidden>
+  <button data-tab="home"><span>📚</span>Manuais</button>
+  <button data-tab="conv"><span>📏</span>Conversão</button>
+  <button data-tab="check" hidden><span>✅</span>Checklist</button>
+</nav>
 
 <!-- ============ DIÁLOGOS ============ -->
 <div id="sheet" class="sheet" hidden>

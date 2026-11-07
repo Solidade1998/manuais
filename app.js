@@ -4,7 +4,7 @@
 // =====================================================================
 import * as pdfjsLib from './lib/pdf.min.mjs';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '3.1.0';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.mjs';
 const LIB = new URL('lib/', location.href).href;
 const PDF_OPTS = {
@@ -71,7 +71,7 @@ function toast(msg, ms = 2500) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toastT); if (ms) toastT = setTimeout(() => (t.hidden = true), ms);
 }
-const fmtMB = b => (b / 1048576).toFixed(b > 104857600 ? 0 : 1) + ' MB';
+const fmtMB = b => b < 1048576 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1048576).toFixed(b > 104857600 ? 0 : 1).replace('.', ',') + ' MB';
 
 // Normalização para busca: sem acento e minúsculo, MESMO tamanho do texto
 // original (assim dá para recortar e destacar o trecho certo).
@@ -148,6 +148,10 @@ const S = {
   ixId: null,                  // manual sendo indexado
 };
 const docById = id => S.docs.find(d => d.id === id);
+S.brand = (() => { try { return localStorage.getItem('manuais.brand') || 'Todas'; } catch { return 'Todas'; } })();
+const brandOf = d => d.brand || 'Outros';
+const inBrand = d => S.brand === 'Todas' || brandOf(d) === S.brand;
+const visDocs = () => S.docs.filter(inBrand);
 
 // ---------------------------------------------------------------------
 //  PDF
@@ -177,6 +181,20 @@ async function readOutline(pdf) {
   let ol;
   try { ol = await pdf.getOutline(); } catch { return []; }
   if (!ol?.length) return [];
+  // Esquemas EPLAN: o sumário tem dezenas de milhares de itens (lista de cada
+  // fio/borne). Usa só a "árvore de páginas", que é o que interessa.
+  let eplan = false;
+  const tree = ol.find(o => /^(árvore de páginas|arvore de paginas|arborescence de page|page tree|seitenbaum)/i.test((o.title || '').trim()));
+  if (tree?.items?.length) {
+    eplan = true; ol = tree.items;
+    if (ol.length === 1 && ol[0].items?.length) ol = ol[0].items; // pula a raiz única
+  }
+  // limite de itens: corta os níveis mais fundos se passar de 4000
+  const MAXN = 4000;
+  const perDepth = [];
+  (function cnt(items, d) { for (const it of items) { perDepth[d] = (perDepth[d] || 0) + 1; if (it.items?.length) cnt(it.items, d + 1); } })(ol, 0);
+  let maxDepth = perDepth.length, acc = 0;
+  for (let d = 0; d < perDepth.length; d++) { acc += perDepth[d]; if (acc > MAXN) { maxDepth = Math.max(1, d); break; } }
   const pageOf = async dest => {
     try {
       if (typeof dest === 'string') dest = await pdf.getDestination(dest);
@@ -187,12 +205,14 @@ async function readOutline(pdf) {
     } catch {}
     return null;
   };
-  const walk = async (items, prefix) => {
+  const walk = async (items, prefix, depth = 0) => {
     const out = [];
     for (let i = 0; i < items.length; i++) {
       const it = items[i], id = prefix ? prefix + '.' + i : String(i);
-      const n = { id, t: (it.title || '').replace(/\s+/g, ' ').trim() || '(sem título)', p: await pageOf(it.dest) };
-      if (it.items?.length) n.c = await walk(it.items, id);
+      let t = (it.title || '');
+      if (eplan) t = t.replace(/_/g, ' ').replace(/^&E[A-Z]{2,3}\d*\s+/, '');
+      const n = { id, t: t.replace(/\s+/g, ' ').trim() || '(sem título)', p: await pageOf(it.dest) };
+      if (it.items?.length && depth + 1 < maxDepth) n.c = await walk(it.items, id, depth + 1);
       if (n.p == null && n.c?.length) n.p = n.c.find(x => x.p != null)?.p ?? null;
       out.push(n);
     }
@@ -206,12 +226,12 @@ async function readOutline(pdf) {
 //  coloca nome bonito, grupo, ordem e sistema. Para novas máquinas,
 //  é só acrescentar linhas aqui.
 // ---------------------------------------------------------------------
-const G_MAN = 'MHC80 — Manuais', G_TRE = 'MHC — Treinamento', G_ESQ = 'MHC — Esquemas';
+const G_MAN = 'MHC80 — Manuais', G_TRE = 'MHC80 — Treinamento', G_ESQ = 'MHC80 — Esquemas';
 const CATALOG = [
-  [/corrective.?maintenance|manuten..o.?corretiva/i, 'Manutenção Corretiva', G_MAN, 10],
-  [/preventive.?maintenance|manuten..o.?preventiva/i, 'Manutenção Preventiva', G_MAN, 11],
-  [/operator.?manual|manual.?de.?opera/i, 'Manual de Operação', G_MAN, 12],
-  [/lockout|intertravamento/i, 'Intertravamento (Bloqueio e Etiquetagem)', G_MAN, 13, 'Segurança'],
+  [/MHC80.*corrective.?maintenance/i, 'Manutenção Corretiva', G_MAN, 10],
+  [/MHC80.*preventive.?maintenance/i, 'Manutenção Preventiva', G_MAN, 11],
+  [/MHC80.*operator.?manual|manual.?de.?opera.*MHC80/i, 'Manual de Operação', G_MAN, 12],
+  [/MHC80.*lockout|intertravamento.*MHC80/i, 'Intertravamento (Bloqueio e Etiquetagem)', G_MAN, 13, 'Segurança'],
   [/(^|[^.\d])1_MHC_Introduction/i, '1 · Introdução', G_TRE, 21],
   [/2_MHC_Mechanical/i, '2 · Sistema Mecânico', G_TRE, 22, 'Mecânica'],
   [/3_MHC_Pneumatic/i, '3 · Sistema Pneumático', G_TRE, 23, 'Pneumática'],
@@ -222,12 +242,21 @@ const CATALOG = [
   [/7_MHC_General/i, '7 · Operações Gerais', G_TRE, 28],
   [/8_MHC_Maintenance/i, '8 · Tarefas de Manutenção', G_TRE, 29],
   [/9_MHC_Trouble/i, '9 · Solução de Problemas', G_TRE, 30],
-  [/EL.?TRICO.?HIDR/i, 'Esquema Elétrico / Hidráulico', G_ESQ, 41, 'Elétrica'],
-  [/^AR.?ESQUEM|ESQUEM.{0,6}AR\b/i, 'Esquema Pneumático (Ar)', G_ESQ, 40, 'Pneumática'],
-  [/HIDR.?ULICO.?ESQUEM/i, 'Esquema Hidráulico', G_ESQ, 42, 'Hidráulica'],
-];
+  [/EL.?TRICO.?HIDR.*MHC/i, 'Esquema Elétrico / Hidráulico', G_ESQ, 41, 'Elétrica'],
+  [/^AR.?ESQUEM.*MHC/i, 'Esquema Pneumático (Ar)', G_ESQ, 40, 'Pneumática'],
+  [/^HIDR.?ULICO.?ESQUEM.*MHC/i, 'Esquema Hidráulico', G_ESQ, 42, 'Hidráulica'],
+].map(([re, name, group, order, cat]) => [re, name, group, order, cat, 'Loram']);
+// Convenção para arquivos já organizados:  Marca__Grupo__Ordem__Nome[__Sistema].pdf
+function fromConvention(file) {
+  const base = String(file || '').normalize('NFC').replace(/\.pdf$/i, '').replace(/^.*[\\/]/, '');
+  const p = base.split('__').map(x => x.trim());
+  if (p.length < 4 || !/^\d+$/.test(p[2])) return null;
+  const cat = p[4] && CAT_ORDER.find(c => norm(c) === norm(p[4]));
+  return { brand: p[0], group: p[1], order: +p[2], name: p[3], cat: cat || undefined };
+}
 function fromCatalog(file) {
-  for (const [re, name, group, order, cat] of CATALOG) if (re.test(file)) return { name, group, order, cat };
+  const conv = fromConvention(file); if (conv) return conv;
+  for (const [re, name, group, order, cat, brand] of CATALOG) if (re.test(file)) return { name, group, order, cat, brand };
   return null;
 }
 
@@ -247,6 +276,7 @@ async function addPdfBlob(blob, meta) {
     id: uid(), rid: meta.rid || null, sha: meta.sha || null,
     name: meta.name || known.name || (meta.file || 'Manual').replace(/\.pdf$/i, '').replace(/_+/g, ' ').trim(),
     file: meta.file || '', group: meta.group ?? known.group ?? '', order: meta.order ?? known.order, cat: meta.cat ?? known.cat,
+    brand: meta.brand ?? known.brand ?? null,
     size: blob.size, pages, added: Date.now(), opened: 0, lastPage: 1, outline, favs: [], catFix: {},
     textDone: false, textProgress: 0,
   };
@@ -354,7 +384,7 @@ async function wipeAll(reason) {
   closeViewer(true);
   for (const d of [...S.docs]) await removeLocalDoc(d).catch(() => {});
   S.docs = []; S.texts.clear();
-  AUTH = {}; lsSet(LS_AUTH, null);
+  AUTH = {}; lsSet(LS_AUTH, null); lsSet('manuais.sel', null); try { SEL = null; } catch {}
   showLogin(reason, true);
 }
 
@@ -362,7 +392,7 @@ async function wipeAll(reason) {
 async function checkAccess() {
   try {
     const r = await api('me');
-    AUTH.lastOk = Date.now(); AUTH.admin = r.admin; AUTH.name = r.name; lsSet(LS_AUTH, AUTH);
+    AUTH.lastOk = Date.now(); AUTH.admin = r.admin; AUTH.name = r.name; AUTH.storage = r.storage; lsSet(LS_AUTH, AUTH);
     $('#btnAdmin').hidden = !AUTH.admin;
     return true;
   } catch (e) {
@@ -405,11 +435,17 @@ async function sync(manual) {
     // nome/grupo mudou → só atualiza
     for (const r of remote) {
       const d = byRid.get(r.rid);
-      if (d && d.sha === r.sha && (d.name !== r.name || d.group !== r.group || d.order !== r.order || d.cat !== r.cat)) {
-        Object.assign(d, { name: r.name, group: r.group, order: r.order, cat: r.cat, _cats: null }); await saveDoc(d);
+      if (d && d.sha === r.sha && (d.name !== r.name || d.group !== r.group || d.order !== r.order || d.cat !== r.cat || (d.brand || null) !== (r.brand || null))) {
+        Object.assign(d, { name: r.name, group: r.group, order: r.order, cat: r.cat, brand: r.brand || null, _cats: null }); await saveDoc(d);
       }
     }
-    const todo = remote.filter(r => byRid.get(r.rid)?.sha !== r.sha).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    // desmarcados → saem do celular
+    if (SEL) for (const d of S.docs.filter(d => d.rid && remote.some(r => r.rid === d.rid && !wanted(r)))) await removeLocalDoc(d);
+    // primeira vez: pede para escolher
+    if (!SEL && !AUTH.admin) { if ($('#home').classList.contains('active')) go({ s: 'pick' }); return; }
+    const todo = remote.filter(r => wanted(r) && byRid.get(r.rid)?.sha !== r.sha).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    const novos = remote.filter(r => !wanted(r) && !SEL?.off?.includes(r.rid) && !S.docs.some(d => d.rid === r.rid));
+    S.cloudOnly = novos.length;
     if (!todo.length) { if (manual) toast('Manuais em dia ✔'); return; }
     const total = todo.reduce((a, r) => a + r.size, 0); let done = 0;
     for (let k = 0; k < todo.length; k++) {
@@ -475,8 +511,8 @@ async function indexDoc(d) {
       }
       rec.pages.push(s.replace(/\s+/g, ' ').trim());
       // título da página (para PDFs sem sumário)
-      const t = pageTitle([...lines.entries()].map(([y, L]) => ({ y, t: L.t.replace(/\s+/g, ' ').trim(), s: L.s })).filter(l => l.t), page.view[3] - page.view[1]);
-      if (t) rec.heads.push({ p, t });
+      const pc = pageCands([...lines.entries()].map(([y, L]) => ({ y, t: L.t.replace(/\s+/g, ' ').trim(), s: L.s })).filter(l => l.t), page.view[3] - page.view[1]);
+      if (pc.c.length) rec.heads.push({ p, ...pc });
       page.cleanup();
       if (p % 25 === 0 || p === pdf.numPages) {
         d.textProgress = p / pdf.numPages;
@@ -502,38 +538,53 @@ async function indexDoc(d) {
   }
 }
 
-// Descobre o título de uma página. Funciona com slides exportados do
-// PowerPoint (título em cima, número do slide, anotações embaixo) e com
-// páginas comuns (primeira linha em letra bem maior que o resto).
-function pageTitle(lines, h) {
+// Candidatos a título de cada página (linhas do alto da página). Funciona
+// com slides do PowerPoint (título em cima, número do slide, anotações
+// embaixo) e com páginas comuns. A escolha final é feita em autoOutline,
+// depois de descartar cabeçalhos/rodapés que se repetem.
+function pageCands(lines, h) {
   lines.sort((a, b) => b.y - a.y);
   const num = lines.find(l => /^\d{1,3}$/.test(l.t) && l.s <= 10 && l.y > h * 0.35 && l.y < h * 0.75);
   let region = num ? lines.filter(l => l.y > num.y + 2) : lines.filter(l => l.y > h * 0.6);
-  region = region.filter(l => !/^\d{1,3}$/.test(l.t) && /[a-zA-ZÀ-ú]{2}/.test(l.t));
+  region = region.filter(l => !/^\d{1,3}$/.test(l.t) && /[a-zA-ZÀ-ú]{2}/.test(l.t)).slice(0, 10);
+  const sizes = lines.map(l => l.s).sort((a, b) => a - b), m = sizes[Math.floor(sizes.length / 2)] || 10;
+  return { c: region.map(l => ({ t: l.t.slice(0, 120), s: l.s, y: l.y })), m, sl: !!num };
+}
+// chave para achar linhas repetidas (ignora ordem das palavras e números de página)
+const hkey = t => norm(t).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(w => w && !/^[a-z]?\d{1,4}[a-z]?$/.test(w)).sort().join(' ');
+const isUpper = t => { const L = t.replace(/[^A-Za-zÀ-ú]/g, ''); return L.length >= 4 && L === L.toUpperCase(); };
+function pickTitle(pc, bad) {
+  const region = pc.c.filter(l => !bad.has(hkey(l.t)));
   if (!region.length) return null;
-  const sizes = lines.map(l => l.s).sort((a, b) => a - b), median = sizes[Math.floor(sizes.length / 2)];
   const max = Math.max(...region.map(l => l.s));
-  if (!num && (max < median * 1.25 || region[0].s < max)) return null;
-  if (max < 12) return null;
-  // junta as linhas seguidas do título (título em 2 linhas)
-  const first = region.findIndex(l => l.s === max);
+  let first, upperMode = false;
+  if (pc.sl || (max >= pc.m * 1.25 && max >= 12 && region[0].s === max)) first = region.findIndex(l => l.s === max);
+  else { first = region.slice(0, 3).findIndex(l => isUpper(l.t) && l.t.length <= 70); upperMode = true; if (first < 0) return null; }
   const parts = [region[first]];
   for (let i = first + 1; i < region.length && parts.length < 3; i++) {
     const l = region[i], prev = parts[parts.length - 1];
-    if (l.s === max && prev.y - l.y < max * 1.8) parts.push(l); else break;
+    if (l.s === parts[0].s && prev.y - l.y < parts[0].s * 1.8 && (!upperMode || isUpper(l.t))) parts.push(l); else break;
   }
   const t = parts.map(l => l.t).join(' ').replace(/\s+/g, ' ').trim();
   return t.length >= 3 && t.length <= 90 && /^[A-ZÀ-Ý0-9"“(]/.test(t) && !/[.:;]$/.test(t) ? t : null;
 }
 
 function autoOutline(rec) {
+  const heads = rec.heads || [];
+  // esquemas EPLAN sem marcadores: o "título" seria o carimbo do desenho — melhor sem sumário
+  if (rec.pages.filter(t => /ePLAN|EPLAN/.test(t)).length > rec.pages.length * 0.3) return [];
+  // linhas que aparecem em muitas páginas = cabeçalho/rodapé
+  const freqL = {};
+  for (const h of heads) if (h.c) for (const k of new Set(h.c.map(l => hkey(l.t)))) freqL[k] = (freqL[k] || 0) + 1;
+  const limL = Math.max(5, heads.length * 0.03);
+  const bad = new Set(Object.keys(freqL).filter(k => freqL[k] > limL));
+  const titles = heads.map(h => ({ p: h.p, t: h.c ? pickTitle(h, bad) : h.t })).filter(x => x.t);
   const base = t => norm(t).replace(/[,;.\s]*\(?(cont\.?|continua..o|continued)\)?\s*$/i, '').trim();
-  // cabeçalhos que se repetem em muitas páginas não servem
   const freq = {};
-  for (const h of rec.heads) freq[base(h.t)] = (freq[base(h.t)] || 0) + 1;
-  const lim = Math.max(4, rec.pages.length * 0.2);
+  for (const h of titles) freq[base(h.t)] = (freq[base(h.t)] || 0) + 1;
+  const lim = 4; // título repetido em mais de 4 páginas = capa/cabeçalho, não capítulo
   const out = []; let last = null;
-  for (const h of rec.heads) {
+  for (const h of titles) {
     const b = base(h.t);
     if (freq[b] > lim) continue;
     if (b === last) continue; // "..., cont." = continuação do mesmo assunto
@@ -567,7 +618,7 @@ async function loadTexts(ids) {
 // ---------------------------------------------------------------------
 async function search(q, onlyId) {
   const ts = terms(q); if (!ts.length) return { topics: [], pages: [] };
-  const docs = onlyId ? [docById(onlyId)] : S.docs;
+  const docs = onlyId ? [docById(onlyId)] : visDocs();
   const phrase = norm(q.trim()).replace(/\s+/g, ' ');
   const topics = [];
   for (const d of docs) {
@@ -629,7 +680,8 @@ async function renderSearch(box, q, onlyId) {
   if (box._tok !== token) return; // usuário digitou de novo
   box.innerHTML = '';
   const { topics, pages, ts } = res;
-  const pending = (onlyId ? [docById(onlyId)] : S.docs).filter(d => !d.textDone);
+  const pending = (onlyId ? [docById(onlyId)] : visDocs()).filter(d => !d.textDone);
+  if (!onlyId && S.brand !== 'Todas') box.prepend(el('div', { class: 'muted small', style: 'margin:6px 2px' }, `Buscando só em ${S.brand}. Para buscar em tudo, toque em “Todas” lá em cima.`));
   if (topics.length) {
     box.append(el('h3', { class: 'sec' }, `Tópicos do sumário (${topics.length})`));
     for (const { d, f } of topics.slice(0, 60)) {
@@ -661,7 +713,7 @@ async function renderSearch(box, q, onlyId) {
     box.append(el('div', { class: 'empty' }, el('div', { class: 'big' }, '🔎'), `Nada encontrado para “${q}”.`));
   }
   if (pending.length) box.append(el('div', { class: 'note' }, `Ainda preparando a busca dentro do texto de: ${pending.map(d => d.name).join(', ')}. Os resultados vão aparecer quando terminar.`));
-  const scanned = (onlyId ? [docById(onlyId)] : S.docs).filter(d => d.scanned);
+  const scanned = (onlyId ? [docById(onlyId)] : visDocs()).filter(d => d.scanned);
   if (scanned.length) box.append(el('div', { class: 'note' }, `Sem texto pesquisável (PDF escaneado): ${scanned.map(d => d.name).join(', ')}. Neles a busca só encontra o sumário e as páginas salvas.`));
 }
 
@@ -672,6 +724,7 @@ function show(id) {
   const prev = document.querySelector('.screen.active');
   if (prev) S.scroll[prev.id] = prev.querySelector('.body')?.scrollTop || 0;
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+  updateTabs(id);
 }
 function go(state) { history.pushState(state, ''); route(state); }
 async function route(st) {
@@ -687,6 +740,10 @@ async function route(st) {
     show('manual'); renderManual(); restoreScroll('manual', '#manualBody');
   } else if (st.s === 'viewer') { show('viewer'); await startViewer(st); }
   else if (st.s === 'admin') { closeViewer(); show('admin'); renderAdmin(); }
+  else if (st.s === 'pick') { closeViewer(); show('pick'); renderPick(); }
+  else if (st.s === 'conv') { closeViewer(); show('conv'); renderConv(); }
+  else if (st.s === 'check') { closeViewer(); show('check'); renderCheck(); }
+  else if (st.s === 'checkrun') { closeViewer(); show('checkrun'); renderCheckRun(st); }
 }
 function restoreScroll(scr, sel) { const y = S.scroll[scr] || 0; requestAnimationFrame(() => ($(sel).scrollTop = y)); }
 window.addEventListener('popstate', e => route(e.state));
@@ -703,13 +760,25 @@ $('#search').addEventListener('input', e => {
 $('#searchClear').onclick = () => { $('#search').value = S.q = ''; $('#searchClear').hidden = true; renderHome(); };
 $('#search').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
 
+function renderBrands() {
+  const brands = [...new Set(S.docs.map(brandOf))].sort((a, b) => (a === 'Outros') - (b === 'Outros') || a.localeCompare(b, 'pt'));
+  const box = $('#brands'); box.innerHTML = '';
+  if (brands.length < 2) { box.hidden = true; S.brand = 'Todas'; return; }
+  if (S.brand !== 'Todas' && !brands.includes(S.brand)) S.brand = 'Todas';
+  box.hidden = false;
+  for (const b of ['Todas', ...brands]) box.append(el('button', { class: 'brand' + (b === S.brand ? ' on' : ''), onclick: () => {
+    S.brand = b; try { localStorage.setItem('manuais.brand', b); } catch {}
+    S.cat = 'Todos'; renderHome(); $('#homeBody').scrollTop = 0;
+  } }, b));
+}
 function renderChips() {
+  renderBrands();
   const have = new Set();
-  for (const d of S.docs) for (const c of docCats(d).values()) have.add(c);
+  for (const d of visDocs()) for (const c of docCats(d).values()) have.add(c);
   const list = ['Todos', ...CAT_ORDER.filter(c => have.has(c))];
   if (!list.includes(S.cat)) S.cat = 'Todos';
   const box = $('#chips'); box.innerHTML = '';
-  box.hidden = S.docs.length === 0;
+  box.hidden = visDocs().length === 0;
   for (const c of list) box.append(el('button', { class: 'chip' + (c === S.cat ? ' on' : ''), onclick: () => { S.cat = c; S.scroll.home = 0; renderHome(); $('#homeBody').scrollTop = 0; } }, c));
 }
 
@@ -717,19 +786,20 @@ function renderHome(keepScroll) {
   const y = $('#homeBody').scrollTop;
   renderChips();
   const box = $('#homeBody'); box.innerHTML = '';
-  if (!S.docs.length) {
+  if (!visDocs().length) {
     box.append(el('div', { class: 'empty' },
       el('div', { class: 'big' }, '📚'),
       AUTH.admin
         ? el('p', { html: 'Nenhum manual na nuvem ainda.<br>Toque em <b>Painel</b> → <b>Enviar PDFs</b> para publicar os manuais para a equipe.' })
-        : el('p', { html: 'Os manuais vão baixar automaticamente quando houver internet.<br>Toque em <b>⟳</b> para tentar agora.<br><br>Depois de baixados, funcionam <b>sem internet</b>.' })));
+        : el('div', {}, el('p', { html: 'Nenhum manual neste celular ainda.<br>Escolha as máquinas que você atende — só elas serão baixadas.<br><br>Depois de baixados, funcionam <b>sem internet</b>.' }),
+            el('button', { class: 'btn-accent big', onclick: () => go({ s: 'pick' }) }, '📥 Escolher manuais'))));
     return;
   }
   if (S.q.trim()) { renderSearch(box, S.q); return; }
   if (S.cat !== 'Todos') { renderCategory(box, S.cat); if (keepScroll) box.scrollTop = y; return; }
 
   // Continuar lendo
-  const recent = S.docs.filter(d => d.opened).sort((a, b) => b.opened - a.opened).slice(0, 3);
+  const recent = visDocs().filter(d => d.opened).sort((a, b) => b.opened - a.opened).slice(0, 3);
   if (recent.length) {
     box.append(el('h3', { class: 'sec' }, 'Continuar de onde parou'));
     for (const d of recent) {
@@ -740,7 +810,7 @@ function renderHome(keepScroll) {
     }
   }
   // Favoritos
-  const favs = S.docs.flatMap(d => d.favs.map(f => ({ d, f })));
+  const favs = visDocs().flatMap(d => d.favs.map(f => ({ d, f })));
   if (favs.length) {
     box.append(el('h3', { class: 'sec' }, 'Favoritos'));
     for (const { d, f } of favs.sort((a, b) => (b.f.at || 0) - (a.f.at || 0)).slice(0, 12))
@@ -750,11 +820,13 @@ function renderHome(keepScroll) {
   }
   // Manuais por grupo
   const groups = new Map();
-  for (const d of [...S.docs].sort(byOrder)) {
-    const g = d.group || ''; if (!groups.has(g)) groups.set(g, []); groups.get(g).push(d);
+  const multi = new Set(S.docs.map(brandOf)).size > 1 && S.brand === 'Todas';
+  for (const d of [...visDocs()].sort(byBrandOrder)) {
+    const g = (multi ? brandOf(d) + ' · ' : '') + (d.group || ''); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(d);
   }
   const gOrd = g => Math.min(...groups.get(g).map(d => d.order ?? 999));
-  const names = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || gOrd(a) - gOrd(b) || a.localeCompare(b, 'pt'));
+  const gBr = g => brandOf(groups.get(g)[0]);
+  const names = [...groups.keys()].sort((a, b) => (a === '') - (b === '') || gBr(a).localeCompare(gBr(b), 'pt') || gOrd(a) - gOrd(b) || a.localeCompare(b, 'pt'));
   for (const g of names) {
     box.append(el('h3', { class: 'sec' }, g || (names.length > 1 ? 'Outros' : 'Manuais')));
     const grid = el('div', { class: 'grid' });
@@ -765,6 +837,7 @@ function renderHome(keepScroll) {
   if (keepScroll) box.scrollTop = y;
 }
 
+function byBrandOrder(a, b) { return brandOf(a).localeCompare(brandOf(b), 'pt') || byOrder(a, b); }
 function byOrder(a, b) { return (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt', { numeric: true }); }
 function docCard(d) {
   const meta = `${d.pages} pág.` + (d.outline?.length ? '' : d.auto?.length ? ' · sumário auto' : ' · sem sumário');
@@ -787,14 +860,14 @@ async function footer(box) {
 
 function renderCategory(box, cat) {
   let any = false;
-  for (const d of [...S.docs].sort(byOrder)) {
+  for (const d of [...visDocs()].sort(byBrandOrder)) {
     const cats = docCats(d);
     const roots = [];
     const walk = (nodes, parentCat) => { for (const n of nodes) { const c = cats.get(n.id); if (c === cat && parentCat !== cat) roots.push(n); else if (n.c) walk(n.c, c); } };
     walk(outlineOf(d), null);
     if (!roots.length) continue;
     any = true;
-    box.append(el('h3', { class: 'sec' }, d.name));
+    box.append(el('h3', { class: 'sec' }, (S.brand === 'Todas' && d.brand ? d.brand + ' · ' : '') + d.name));
     box.append(renderTree(roots, d, { top: true }));
   }
   if (!any) box.append(el('div', { class: 'empty' }, 'Nenhum capítulo nesta categoria.'));
@@ -1192,6 +1265,96 @@ $('#btnMark').onclick = () => {
 };
 
 // ---------------------------------------------------------------------
+//  Escolher quais manuais baixar neste celular
+// ---------------------------------------------------------------------
+const LS_SEL = 'manuais.sel';
+let SEL = lsGet(LS_SEL, null); // {machines:[], docs:[], off:[]}  · null = ainda não escolheu
+const machineOf = r => (r.group || '').split(' — ')[0].trim() || r.group || 'Geral';
+const mkey = r => (r.brand || 'Outros') + '|' + machineOf(r);
+function wanted(r) {
+  if (!SEL) return !!AUTH.admin; // admin recebe tudo até escolher
+  if (SEL.docs?.includes(r.rid)) return true;
+  return !!SEL.machines?.includes(mkey(r)) && !SEL.off?.includes(r.rid);
+}
+$('#btnPick').onclick = () => go({ s: 'pick' });
+
+let PICK = null; // {remote, sel}
+async function renderPick() {
+  const box = $('#pickBody');
+  box.innerHTML = '<div class="empty">Carregando a lista da nuvem…</div>';
+  let remote;
+  try { remote = (await api('docs')).docs; }
+  catch (e) { box.innerHTML = ''; box.append(el('div', { class: 'note' }, 'Sem internet. Para escolher os manuais, conecte o celular à internet.')); $('#pickSum').textContent = ''; return; }
+  const base = SEL || (AUTH.admin ? { machines: [...new Set(remote.map(mkey))], docs: [], off: [] } : { machines: [], docs: [], off: [] });
+  PICK = { remote, sel: JSON.parse(JSON.stringify(base)), open: PICK?.open || new Set() };
+  drawPick();
+}
+function pickWanted(r) {
+  const s = PICK.sel;
+  return s.docs.includes(r.rid) || (s.machines.includes(mkey(r)) && !s.off.includes(r.rid));
+}
+function drawPick() {
+  const box = $('#pickBody'); box.innerHTML = '';
+  const { remote, sel } = PICK;
+  box.append(el('div', { class: 'note' }, 'Marque as máquinas que você atende (ou só os manuais que quiser). Só o que estiver marcado é baixado para o celular. Marcando a máquina inteira, os manuais novos dela também chegam sozinhos.'));
+  const brands = [...new Set(remote.map(r => r.brand || 'Outros'))].sort((a, b) => a.localeCompare(b, 'pt'));
+  for (const b of brands) {
+    box.append(el('h3', { class: 'sec' }, b));
+    const rs = remote.filter(r => (r.brand || 'Outros') === b);
+    const machines = [...new Set(rs.map(machineOf))].sort((x, y) => Math.min(...rs.filter(r => machineOf(r) === x).map(r => r.order ?? 999)) - Math.min(...rs.filter(r => machineOf(r) === y).map(r => r.order ?? 999)));
+    for (const m of machines) {
+      const docs = rs.filter(r => machineOf(r) === m).sort((x, y) => (x.order ?? 999) - (y.order ?? 999));
+      const key = b + '|' + m;
+      const on = docs.filter(pickWanted);
+      const state = on.length === 0 ? '' : on.length === docs.length ? 'on' : 'part';
+      const size = docs.reduce((a, r) => a + r.size, 0), sizeOn = on.reduce((a, r) => a + r.size, 0);
+      const wrap = el('div', { class: 'mach' });
+      const toggleMachine = () => {
+        if (state === 'on') { sel.machines = sel.machines.filter(k => k !== key); sel.docs = sel.docs.filter(id => !docs.some(r => r.rid === id)); }
+        else { if (!sel.machines.includes(key)) sel.machines.push(key); sel.off = sel.off.filter(id => !docs.some(r => r.rid === id)); }
+        drawPick();
+      };
+      const opened = PICK.open.has(key);
+      wrap.append(el('div', { class: 'mrow' },
+        el('button', { class: 'ck ' + state, 'aria-label': 'Marcar máquina', onclick: toggleMachine }, state === 'on' ? '✓' : state === 'part' ? '–' : ''),
+        el('button', { class: 'main', style: 'text-align:left', onclick: () => { opened ? PICK.open.delete(key) : PICK.open.add(key); drawPick(); } },
+          el('div', { class: 't', style: 'font-weight:700' }, m),
+          el('div', { class: 's muted small' }, `${on.length} de ${docs.length} manuais · ${fmtMB(sizeOn)} de ${fmtMB(size)}`)),
+        el('button', { class: 'btn-ghost', onclick: () => { opened ? PICK.open.delete(key) : PICK.open.add(key); drawPick(); } }, opened ? '▲' : '▼')));
+      if (opened) {
+        const list = el('div', { class: 'mlist' }); let lastG = null;
+        for (const r of docs) {
+          const g = (r.group || '').split(' — ').slice(1).join(' — ');
+          if (g && g !== lastG) { list.append(el('div', { class: 'gsub' }, g)); lastG = g; }
+          const w = pickWanted(r);
+          list.append(el('div', { class: 'drow' },
+            el('button', { class: 'ck ' + (w ? 'on' : ''), onclick: () => {
+              if (sel.machines.includes(key)) { w ? sel.off.push(r.rid) : (sel.off = sel.off.filter(x => x !== r.rid)); }
+              else { w ? (sel.docs = sel.docs.filter(x => x !== r.rid)) : sel.docs.push(r.rid); }
+              drawPick();
+            } }, w ? '✓' : ''),
+            el('div', { class: 'main' }, el('div', {}, r.name), el('div', { class: 'muted small' }, `${fmtMB(r.size)}${r.pages ? ' · ' + r.pages + ' pág.' : ''}`))));
+        }
+        wrap.append(list);
+      }
+      box.append(wrap);
+    }
+  }
+  const n = remote.filter(pickWanted), tot = n.reduce((a, r) => a + r.size, 0);
+  $('#pickSum').textContent = `${n.length} manuais marcados · ${fmtMB(tot)} no celular`;
+}
+$('#pickSave').onclick = async () => {
+  if (!PICK) return;
+  const keep = new Set(PICK.remote.filter(pickWanted).map(r => r.rid));
+  const drop = S.docs.filter(d => d.rid && !keep.has(d.rid));
+  if (drop.length && !confirm(`${drop.length} manual(is) desmarcado(s) serão apagados deste celular (os favoritos deles também). Continuar?`)) return;
+  SEL = PICK.sel; lsSet(LS_SEL, SEL);
+  for (const d of drop) await removeLocalDoc(d);
+  history.back();
+  setTimeout(() => sync(true), 300);
+};
+
+// ---------------------------------------------------------------------
 //  Painel do administrador
 // ---------------------------------------------------------------------
 $('#btnAdmin').onclick = () => go({ s: 'admin' });
@@ -1224,6 +1387,11 @@ async function renderAdmin() {
   try {
     const [c, d] = await Promise.all([api('admin/codes'), api('docs')]);
     ADM = { codes: c.codes, docs: d.docs, loaded: true };
+    // manuais enviados antes de existir "marca": completa pelo catálogo
+    for (const r of ADM.docs.filter(r => (r.mv || 0) < 2)) {
+      const k = fromCatalog(r.file);
+      try { ADM.docs = (await api('admin/docmeta', { json: { rid: r.rid, ...(k || {}), mv: 2 } })).docs; } catch {}
+    }
   } catch (e) {
     box.innerHTML = ''; box.append(el('div', { class: 'note' }, 'Não consegui falar com o servidor: ' + (e.status ? e.message : 'sem internet') + '.'));
     return;
@@ -1249,13 +1417,14 @@ async function renderAdmin() {
   box.append(el('h3', { class: 'sec' }, `Manuais na nuvem (${ADM.docs.length} · ${fmtMB(total)})`));
   box.append(el('button', { class: 'row', style: 'justify-content:center;font-weight:700;color:var(--accent2)', onclick: () => $('#fileInput').click() }, '＋ Enviar PDFs (novos ou atualizados)'));
   box.append(el('div', { class: 'note' }, 'Dica: envie pelo computador, é mais rápido. Se mandar um PDF com o mesmo nome de arquivo de um que já está na nuvem, ele substitui o antigo para todos (os favoritos de cada um são mantidos).'));
-  for (const r of [...ADM.docs].sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt'))) {
+  for (const r of [...ADM.docs].sort((a, b) => (a.brand || '').localeCompare(b.brand || '') || (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt'))) {
     const local = S.docs.find(d => d.rid === r.rid);
     box.append(el('button', { class: 'row', onclick: () => local ? editDocSheet(local) : toast('Este manual ainda está baixando neste aparelho') },
-      el('div', { class: 'main' }, el('div', { class: 't' }, r.name), el('div', { class: 's' }, `${r.group || 'sem grupo'} · ${fmtMB(r.size)}${r.pages ? ' · ' + r.pages + ' pág.' : ''}`)),
+      el('div', { class: 'main' }, el('div', { class: 't' }, r.name), el('div', { class: 's' }, `${r.brand ? r.brand + ' · ' : ''}${r.group || 'sem grupo'} · ${fmtMB(r.size)}${r.pages ? ' · ' + r.pages + ' pág.' : ''}`)),
       el('div', { class: 'pg' }, '⋯')));
   }
-  box.append(el('div', { class: 'empty small', style: 'padding:20px 0 0' }, `Endereço do app: ${appUrl()}`));
+  box.append(el('div', { class: 'empty small', style: 'padding:20px 0 0' }, `Endereço do app: ${appUrl()}`,
+    el('br'), AUTH.storage === 'R2' ? 'Arquivos guardados no R2 (até 10 GB grátis) ✔' : 'Arquivos guardados no KV (limite de 1 GB) — ative o R2 para caber tudo'));
 }
 
 function newCodeSheet() {
@@ -1332,7 +1501,12 @@ async function uploadFiles(files) {
       const buf = await f.arrayBuffer();
       const sha = await sha16(buf);
       const old = remote.find(r => r.file === f.name);
-      if (old && old.sha === sha) { sent += f.size; status.textContent = `${f.name}: já está na nuvem`; continue; }
+      if (old && old.sha === sha) {
+        sent += f.size; status.textContent = `${f.name}: já está na nuvem`;
+        const k2 = fromCatalog(f.name);
+        if (k2) { const r = await api('admin/docmeta', { json: { rid: old.rid, ...k2 } }); remote = r.docs; ok++; }
+        continue;
+      }
       const rid = old?.rid || slug(f.name) + '-' + Math.random().toString(36).slice(2, 6);
       const parts = Math.max(1, Math.ceil(buf.byteLength / PART));
       for (let i = 0; i < parts; i++) {
@@ -1345,10 +1519,10 @@ async function uploadFiles(files) {
       // guarda também neste aparelho (sem baixar de novo)
       const localOld = S.docs.find(d => d.rid === rid);
       const known = fromCatalog(f.name) || {};
-      const meta = { rid, sha, file: f.name, name: old?.name || known.name, group: old?.group ?? known.group, order: old?.order ?? known.order, cat: old?.cat ?? known.cat };
+      const meta = { rid, sha, file: f.name, name: known.name || old?.name, group: known.group ?? old?.group, order: known.order ?? old?.order, cat: known.cat ?? old?.cat, brand: known.brand ?? old?.brand };
       const doc = await addPdfBlob(new Blob([buf], { type: 'application/pdf' }), meta);
       if (localOld) { doc.favs = localOld.favs; doc.lastPage = localOld.lastPage; await saveDoc(doc); await removeLocalDoc(localOld); }
-      const r = await api('admin/doc', { json: { rid, sha, parts, size: f.size, file: f.name, name: doc.name, group: doc.group, order: doc.order ?? null, cat: doc.cat ?? null, pages: doc.pages } });
+      const r = await api('admin/doc', { json: { rid, sha, parts, size: f.size, file: f.name, name: doc.name, group: doc.group, order: doc.order ?? null, cat: doc.cat ?? null, brand: doc.brand ?? null, pages: doc.pages } });
       remote = r.docs; ok++;
     } catch (e) {
       console.error(e);
@@ -1358,6 +1532,274 @@ async function uploadFiles(files) {
   bar.firstChild.style.width = '100%';
   closeSheet(); toast(`${ok} manual(is) publicado(s) para a equipe`, 4000);
   renderAdmin(); renderHome(true); indexQueue();
+}
+
+// ---------------------------------------------------------------------
+//  Abas (Manuais · Conversão · Checklist)
+// ---------------------------------------------------------------------
+const TAB_SCREENS = ['home', 'conv', 'check'];
+document.querySelectorAll('#tabs button').forEach(b => (b.onclick = () => {
+  const t = b.dataset.tab;
+  if (document.querySelector('.screen.active')?.id === t) return;
+  history.replaceState({ s: t }, ''); route({ s: t });
+}));
+function updateTabs(id) {
+  const on = TAB_SCREENS.includes(id) && !!AUTH.token;
+  $('#tabs').hidden = !on; document.body.classList.toggle('withtabs', on);
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === id));
+}
+
+// ---------------------------------------------------------------------
+//  Conversão mm · pol · cm (foco em chaves)
+// ---------------------------------------------------------------------
+const IN = 25.4;
+const W_MM = [5.5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32, 34, 35, 36, 38, 41, 42, 46, 50, 55, 60, 65, 70, 75, 80];
+const W_IN = ['1/4', '5/16', '11/32', '3/8', '7/16', '1/2', '9/16', '5/8', '11/16', '3/4', '13/16', '7/8', '15/16', '1', '1 1/16', '1 1/8', '1 3/16', '1 1/4', '1 5/16', '1 3/8',
+  '1 7/16', '1 1/2', '1 9/16', '1 5/8', '1 11/16', '1 3/4', '1 13/16', '1 7/8', '2', '2 1/16', '2 3/16', '2 1/4', '2 3/8', '2 1/2', '2 9/16', '2 3/4', '3', '3 1/8'];
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+function parseIn(s) {
+  s = String(s).trim().replace(/["”″]|pol|in/gi, '').replace(',', '.').trim();
+  let m = s.match(/^(\d+)\s*[- ]\s*(\d+)\s*\/\s*(\d+)$/); if (m) return +m[1] + m[2] / m[3];
+  m = s.match(/^(\d+)\s*\/\s*(\d+)$/); if (m) return m[1] / m[2];
+  const v = parseFloat(s); return isFinite(v) ? v : NaN;
+}
+function frac(inches, den = 64) {
+  let n = Math.round(inches * den); if (n === 0) return '0"';
+  const whole = Math.floor(n / den); let r = n % den;
+  if (!r) return whole + '"';
+  const g = gcd(r, den); const f = `${r / g}/${den / g}`;
+  return (whole ? whole + ' ' : '') + f + '"';
+}
+const fmtN = (v, d = 2) => (Math.round(v * 10 ** d) / 10 ** d).toString().replace('.', ',');
+function fitTxt(diff) {
+  const a = Math.abs(diff);
+  if (a <= 0.15) return ['ok', '✔ serve'];
+  if (a <= 0.4) return ['mid', diff > 0 ? '≈ fica um pouco folgada' : '≈ fica justa — teste antes'];
+  return ['no', '✖ não serve'];
+}
+let CONV = { unit: lsGet('manuais.cvu', 'mm'), val: '' };
+function renderConv() {
+  const box = $('#convBody'); box.innerHTML = '';
+  const inp = el('input', { inputmode: CONV.unit === 'pol' ? 'text' : 'decimal', value: CONV.val, placeholder: CONV.unit === 'pol' ? 'ex.: 3/4 ou 1 1/8' : 'ex.: 19', autocomplete: 'off', enterkeyhint: 'done' });
+  const seg = el('div', { class: 'seg3' }, ['mm', 'pol', 'cm'].map(u => el('button', { class: u === CONV.unit ? 'on' : '', onclick: () => {
+    // mantém a medida ao trocar a unidade
+    const mm = toMM(); CONV.unit = u; lsSet('manuais.cvu', u);
+    if (isFinite(mm)) CONV.val = u === 'mm' ? fmtN(mm, 2) : u === 'cm' ? fmtN(mm / 10, 3) : frac(mm / IN).replace('"', '');
+    renderConv();
+  } }, u === 'pol' ? 'pol (")' : u)));
+  const res = el('div');
+  const toMM = () => { const v = CONV.unit === 'pol' ? parseIn(CONV.val) * IN : parseFloat(String(CONV.val).replace(',', '.')) * (CONV.unit === 'cm' ? 10 : 1); return v; };
+  const draw = () => {
+    res.innerHTML = '';
+    const mm = toMM();
+    if (!isFinite(mm) || mm <= 0) { res.append(el('div', { class: 'muted small', style: 'margin:4px 2px' }, CONV.unit === 'pol' ? 'Digite em polegada: 3/4, 1 1/8, 0,75…' : 'Digite a medida.')); return; }
+    const inch = mm / IN;
+    const grid = el('div', { class: 'cv-res' },
+      el('div', { class: 'cv-box' }, el('div', { class: 'k' }, 'Milímetro'), el('div', { class: 'v' }, fmtN(mm, 2) + ' mm')),
+      el('div', { class: 'cv-box' }, el('div', { class: 'k' }, 'Polegada (fração)'), el('div', { class: 'v' }, frac(inch))),
+      el('div', { class: 'cv-box' }, el('div', { class: 'k' }, 'Polegada (decimal)'), el('div', { class: 'v' }, fmtN(inch, 4) + '"')),
+      el('div', { class: 'cv-box' }, el('div', { class: 'k' }, 'Centímetro'), el('div', { class: 'v' }, fmtN(mm / 10, 3) + ' cm')));
+    // chave equivalente
+    const imp = W_IN.map(t => ({ t: t + '"', mm: parseIn(t) * IN })), met = W_MM.map(v => ({ t: fmtN(v, 1) + ' mm', mm: v }));
+    const near = (list) => list.reduce((b, x) => (Math.abs(x.mm - mm) < Math.abs(b.mm - mm) ? x : b));
+    const mk = (title, w) => {
+      const d = w.mm - mm, [cls, txt] = fitTxt(d);
+      return el('div', { class: 'cv-box wide' }, el('div', { class: 'k' }, title),
+        el('div', { class: 'v' }, w.t, el('span', { class: 'muted', style: 'font-size:15px;font-weight:600' }, `  (${fmtN(w.mm, 2)} mm · ${d >= 0 ? '+' : ''}${fmtN(d, 2)} mm)`)),
+        el('div', { class: 'fit ' + cls }, txt));
+    };
+    grid.append(mk('Chave em polegada mais próxima', near(imp)), mk('Chave em milímetro mais próxima', near(met)));
+    res.append(grid);
+  };
+  inp.addEventListener('input', () => { CONV.val = inp.value; draw(); });
+  box.append(seg, el('div', { class: 'cv-in' }, inp), res);
+  // atalhos de chave
+  const quick = CONV.unit === 'pol' ? ['1/4', '5/16', '3/8', '7/16', '1/2', '9/16', '5/8', '11/16', '3/4', '13/16', '7/8', '15/16', '1', '1 1/16', '1 1/8', '1 1/4'] : [8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22, 24, 27, 30];
+  box.append(el('h3', { class: 'sec' }, 'Atalhos'), el('div', { class: 'keys' }, quick.map(q => el('button', { onclick: () => { CONV.val = String(q); inp.value = CONV.val; draw(); } }, CONV.unit === 'pol' ? q + '"' : q + (CONV.unit === 'cm' ? '' : '')))));
+  // tabela de chaves
+  box.append(el('h3', { class: 'sec' }, 'Tabela de chaves mm × pol'));
+  const tb = el('table', { class: 'cvt' }, el('tr', {}, el('th', {}, 'mm'), el('th', {}, 'pol mais próxima'), el('th', {}, 'diferença')));
+  for (const v of W_MM) {
+    const w = W_IN.map(t => ({ t, mm: parseIn(t) * IN })).reduce((b, x) => (Math.abs(x.mm - v) < Math.abs(b.mm - v) ? x : b));
+    const d = w.mm - v, [cls, txt] = fitTxt(d);
+    tb.append(el('tr', { onclick: () => { CONV.unit = 'mm'; CONV.val = String(v).replace('.', ','); renderConv(); $('#convBody').scrollTop = 0; } },
+      el('td', {}, el('b', {}, fmtN(v, 1))), el('td', {}, w.t + '"'), el('td', { class: 'fit ' + cls }, `${d >= 0 ? '+' : ''}${fmtN(d, 2)} mm ${txt.split(' ')[0]}`)));
+  }
+  box.append(tb, el('p', { class: 'muted small' }, '✔ serve: diferença até 0,15 mm · ≈ pode servir, teste antes · ✖ não use (risco de espanar a cabeça do parafuso).'));
+  draw();
+  if (!CONV.val) setTimeout(() => inp.focus(), 100);
+}
+
+// ---------------------------------------------------------------------
+//  Checklist
+// ---------------------------------------------------------------------
+// Modelos de checklist. Para incluir novos, é só acrescentar aqui.
+const CHECKLISTS = [
+  {
+    id: 'mhc80-rota-ligada', brand: 'Loram', machine: 'MHC80', title: 'Rota Ligada', cond: 'MOTOR DIESEL LIGADO', partial: true,
+    items: [
+      [1, 'Segurança', 'Freio manual', 'Aplicar freio manual. +F157:M163', 'Freio manual acionado e volante travado.', 'Diário'],
+      [2, 'Segurança', 'Calço', 'Calçar roda.', 'Calçar máquina de acordo com procedimento específico.', 'Diário'],
+      [3, 'Mecânico', 'Correia de piso', 'Inspecionar correia da esteira de piso quanto ao funcionamento', 'Correia funcionando corretamente, sem nenhum dano, ruptura, rasgos ou rebites ausentes.', 'Diário'],
+      [4, 'Mecânico', 'Correia de transferência', 'Inspecionar correia da esteira de transferência quanto ao funcionamento', 'Correia funcionando corretamente, sem nenhum dano, ruptura, rasgos ou rebites ausentes.', 'Diário'],
+      [5, 'Mecânico', 'Correia de piso', 'Lubrificar corrente da esteira do piso', 'Corrente devidamente lubrificada.', 'Diário'],
+      [6, 'Mecânico', 'Esteiras', 'Inspecionar rolamentos traseiros', 'Rolamentos não gastos, sem sobreaquecimento, sem ruídos incomuns, parafusos apertados.', 'Semanal'],
+      [7, 'Mecânico', 'Correia de piso', 'Inspeção de rodas dentadas, dianteiras e traseiras', 'Rodas dentadas sem rachadura, quebra ou parafusos ausentes.', 'Mensal'],
+      [8, 'Mecânico', 'Correia de transferência', 'Ajuste e inspeção do raspador da correia de transferência', 'Raspador bem ajustado com a correia em funcionamento.', 'Mensal'],
+      [9, 'Mecânico', 'Correia de transferência', 'Rastreamento da correia', 'Correia alinhada.', 'Mensal'],
+      [10, 'Mecânico', 'Correia de transferência', 'Inspeção de polias e rolamentos', 'Rolamento e polia sem acúmulo de detritos ou rachaduras. Rolamento lubrificado.', 'Mensal'],
+      [11, 'Mecânico', 'Correia de piso', 'Ajuste e inspeção do raspador da correia de piso', 'Raspador bem ajustado com a correia em funcionamento.', 'Mensal'],
+    ].map(([seq, sis, sub, at, esp, esc]) => ({ seq, sis, sub, at, esp, esc })),
+  },
+];
+const LS_CKD = 'manuais.ck.draft', LS_CKH = 'manuais.ck.hist';
+const RES = { ok: 'Ok', nok: 'Não Ok', na: 'Não se aplica' };
+const today = () => new Date().toLocaleDateString('pt-BR');
+function newRun(tpl) {
+  return { id: uid(), tpl: tpl.id, date: today(), started: Date.now(), maq: '', resp: AUTH.name && AUTH.name !== 'Administrador' ? AUTH.name : '', esc: ['Diário'], ans: {} };
+}
+const tplOf = id => CHECKLISTS.find(t => t.id === id);
+const drafts = () => lsGet(LS_CKD, {});
+const saveDraft = r => { const d = drafts(); d[r.tpl] = r; lsSet(LS_CKD, d); };
+
+function renderCheck() {
+  const box = $('#checkBody'); box.innerHTML = '';
+  const d = drafts();
+  const open = Object.values(d).filter(r => tplOf(r.tpl));
+  if (open.length) {
+    box.append(el('h3', { class: 'sec' }, 'Em andamento'));
+    for (const r of open) {
+      const t = tplOf(r.tpl), n = Object.keys(r.ans).length;
+      box.append(el('button', { class: 'row', onclick: () => go({ s: 'checkrun', tpl: r.tpl }) },
+        el('div', { class: 'main' }, el('div', { class: 't' }, `${t.machine} · ${t.title}`), el('div', { class: 's' }, `${r.maq || 'sem nº da máquina'} · ${r.date} · ${n} respondido(s)`)),
+        el('div', { class: 'pg' }, '›')));
+    }
+  }
+  box.append(el('h3', { class: 'sec' }, 'Novo checklist'));
+  const machines = [...new Set(CHECKLISTS.map(t => t.brand + ' · ' + t.machine))];
+  for (const m of machines) {
+    for (const t of CHECKLISTS.filter(t => t.brand + ' · ' + t.machine === m)) {
+      box.append(el('button', { class: 'row', onclick: () => {
+        const cur = drafts()[t.id];
+        if (cur && Object.keys(cur.ans).length && !confirm('Já existe um checklist desta rota em andamento. Começar um novo e descartar o atual?')) return go({ s: 'checkrun', tpl: t.id });
+        saveDraft(newRun(t)); go({ s: 'checkrun', tpl: t.id });
+      } },
+        el('div', { class: 'main' }, el('div', { class: 't' }, `${m} — ${t.title}`), el('div', { class: 's' }, `Condição: ${t.cond} · ${t.items.length} itens${t.partial ? ' · exemplo parcial' : ''}`)),
+        el('div', { class: 'pg' }, '＋')));
+    }
+  }
+  const hist = lsGet(LS_CKH, []);
+  if (hist.length) {
+    box.append(el('h3', { class: 'sec' }, 'Últimos feitos'));
+    for (const r of hist.slice(0, 15)) {
+      const t = tplOf(r.tpl); if (!t) continue;
+      const nok = Object.values(r.ans).filter(a => a.r === 'nok').length;
+      box.append(el('button', { class: 'row', onclick: () => summarySheet(r, true) },
+        el('div', { class: 'main' }, el('div', { class: 't' }, `${t.machine} · ${t.title}`, nok ? el('span', { class: 'badge red' }, `${nok} não ok`) : el('span', { class: 'badge ok' }, 'tudo ok')),
+          el('div', { class: 's' }, `${r.maq || '—'} · ${r.date} · ${r.resp || ''}`)), el('div', { class: 'pg' }, '›')));
+    }
+  }
+  box.append(el('div', { class: 'note' }, 'O checklist fica salvo no celular, mesmo sem internet. Ao terminar, use o resumo para passar para a folha (frente: Ok/Não ok de cada item; verso: as falhas).'));
+}
+
+let CR = null;
+function renderCheckRun(st) {
+  const t = tplOf(st.tpl); if (!t) return history.back();
+  CR = drafts()[t.id] || newRun(t); saveDraft(CR);
+  $('#crTitle').textContent = `${t.machine} · ${t.title}`;
+  $('#crSub').textContent = `Condição: ${t.cond}`;
+  const box = $('#crBody'); box.innerHTML = '';
+  const maq = el('input', { value: CR.maq, placeholder: 'ex.: MHC 05', oninput: e => { CR.maq = e.target.value; saveDraft(CR); } });
+  const resp = el('input', { value: CR.resp, placeholder: 'seu nome', oninput: e => { CR.resp = e.target.value; saveDraft(CR); } });
+  box.append(el('div', { class: 'ck-meta' }, el('div', {}, el('label', {}, 'Nº / prefixo da máquina'), maq), el('div', {}, el('label', {}, 'Responsável'), resp)));
+  const escs = [...new Set(t.items.map(i => i.esc))];
+  const seg = el('div', { class: 'chips', style: 'padding:0 0 8px' }, el('span', { class: 'muted small', style: 'align-self:center' }, 'Fazer hoje:'),
+    escs.map(e => el('button', { class: 'chip' + (CR.esc.includes(e) ? ' on' : ''), onclick: () => {
+      CR.esc = CR.esc.includes(e) ? CR.esc.filter(x => x !== e) : [...CR.esc, e]; saveDraft(CR); renderCheckRun(st);
+    } }, e)));
+  box.append(seg);
+  if (t.partial) box.append(el('div', { class: 'note' }, 'Modelo de exemplo (itens 1 a 11 da folha). Quando chegar a folha completa, os demais itens entram aqui.'));
+  const items = t.items.filter(i => CR.esc.includes(i.esc));
+  for (const it of items) box.append(ckItem(it));
+  const hidden = t.items.length - items.length;
+  if (hidden) box.append(el('div', { class: 'muted small', style: 'text-align:center;margin:8px' }, `${hidden} item(ns) de outro escopo escondido(s) — marque em "Fazer hoje" para mostrar.`));
+  updateCrSum(t);
+}
+function ckItem(it) {
+  const a = CR.ans[it.seq] || {};
+  const card = el('div', { class: 'ck-item ' + (a.r || '') });
+  const set = r => {
+    if (CR.ans[it.seq]?.r === r) delete CR.ans[it.seq];
+    else CR.ans[it.seq] = { ...(CR.ans[it.seq] || {}), r };
+    saveDraft(CR); card.replaceWith(ckItem(it)); updateCrSum(tplOf(CR.tpl));
+  };
+  card.append(el('div', { class: 'ck-head' }, el('div', { class: 'ck-seq' }, it.seq),
+    el('div', { style: 'flex:1;min-width:0' },
+      el('div', { class: 'muted small' }, `${it.sis} › ${it.sub} `, el('span', { class: 'tag' }, it.esc)),
+      el('div', { class: 'ck-at' }, it.at),
+      el('div', { class: 'ck-exp' }, 'Esperado: ' + it.esp))));
+  card.append(el('div', { class: 'ck-btns' },
+    el('button', { class: 'b-ok' + (a.r === 'ok' ? ' on' : ''), onclick: () => set('ok') }, '✔ Ok'),
+    el('button', { class: 'b-nok' + (a.r === 'nok' ? ' on' : ''), onclick: () => set('nok') }, '✖ Não ok'),
+    el('button', { class: 'b-na' + (a.r === 'na' ? ' on' : ''), onclick: () => set('na') }, 'N/A')));
+  if (a.r === 'nok') {
+    const f = (k, label, ph, ta) => {
+      const inp = el(ta ? 'textarea' : 'input', { rows: ta ? 2 : null, placeholder: ph, oninput: e => { CR.ans[it.seq][k] = e.target.value; saveDraft(CR); } });
+      inp.value = a[k] || ''; return el('div', {}, el('label', {}, label), inp);
+    };
+    card.append(el('div', { class: 'ck-fail' },
+      f('falha', 'Falha encontrada', 'ex.: raspador danificado', true),
+      f('acao', 'Ação corretiva', 'ex.: troca do raspador', true),
+      f('mat', 'Material', 'ex.: 241920 (1 un)')));
+  }
+  return card;
+}
+function updateCrSum(t) {
+  const items = t.items.filter(i => CR.esc.includes(i.esc));
+  const done = items.filter(i => CR.ans[i.seq]).length, nok = items.filter(i => CR.ans[i.seq]?.r === 'nok').length;
+  $('#crSum').textContent = `${done} de ${items.length} respondidos` + (nok ? ` · ${nok} não ok` : '');
+}
+$('#crDone').onclick = () => CR && summarySheet(CR, false);
+
+function summaryText(r) {
+  const t = tplOf(r.tpl);
+  const items = t.items.filter(i => r.ans[i.seq]);
+  const fails = items.filter(i => r.ans[i.seq].r === 'nok');
+  let s = `*Checklist ${t.machine} — ${t.title}* (${t.cond})\nMáquina: ${r.maq || '—'} · Data: ${r.date} · Resp.: ${r.resp || '—'}\n\n`;
+  s += items.map(i => `${i.seq}. ${i.sub}: ${RES[r.ans[i.seq].r]}`).join('\n');
+  if (fails.length) s += '\n\n*Falhas encontradas*\n' + fails.map(i => { const a = r.ans[i.seq]; return `Seq ${i.seq} — ${a.falha || '?'} → ${a.acao || '?'} · Material: ${a.mat || '—'}`; }).join('\n');
+  return s;
+}
+function summarySheet(r, fromHist) {
+  const t = tplOf(r.tpl);
+  const vis = t.items.filter(i => (r.esc || []).includes(i.esc));
+  const missing = vis.filter(i => !r.ans[i.seq]);
+  const fails = vis.filter(i => r.ans[i.seq]?.r === 'nok');
+  const front = el('table', { class: 'sheet-tbl' }, el('tr', {}, el('th', {}, 'Seq'), el('th', {}, 'Subsistema'), el('th', {}, 'Resultado'), el('th', {}, 'Escopo')),
+    t.items.filter(i => r.ans[i.seq]).map(i => el('tr', {}, el('td', {}, i.seq), el('td', {}, i.sub), el('td', { class: r.ans[i.seq].r === 'nok' ? 'fit no' : r.ans[i.seq].r === 'ok' ? 'fit ok' : '' }, RES[r.ans[i.seq].r]), el('td', {}, i.esc))));
+  const back = fails.length ? el('table', { class: 'sheet-tbl' }, el('tr', {}, el('th', {}, 'Seq'), el('th', {}, 'Falha encontrada'), el('th', {}, 'Ação corretiva'), el('th', {}, 'Material')),
+    fails.map(i => { const a = r.ans[i.seq]; return el('tr', {}, el('td', {}, i.seq), el('td', {}, a.falha || '—'), el('td', {}, a.acao || '—'), el('td', {}, a.mat || '—')); }))
+    : el('p', { class: 'muted' }, 'Nenhuma falha (nada para o verso).');
+  const txt = summaryText(r);
+  openSheet(el('div', {},
+    el('h4', {}, 'Resumo para a folha'),
+    el('div', { class: 'muted small' }, `${t.machine} · ${t.title} · ${r.maq || '—'} · ${r.date}`),
+    missing.length && !fromHist ? el('div', { class: 'note', style: 'color:var(--accent2)' }, `Faltam ${missing.length} item(ns): ${missing.map(i => i.seq).join(', ')}`) : null,
+    el('label', {}, 'FRENTE — resultado de cada item'), front,
+    el('label', {}, 'VERSO — registro de falhas (atividades corretivas)'), back,
+    el('div', { class: 'acts' },
+      el('button', { class: 'ok', onclick: async () => {
+        if (navigator.share) { try { await navigator.share({ text: txt }); return; } catch {} }
+        window.open('https://wa.me/?text=' + encodeURIComponent(txt), '_blank');
+      } }, '📤 Compartilhar'),
+      el('button', { onclick: () => copyText(txt) }, 'Copiar texto'),
+      fromHist ? null : el('button', { class: 'ok', onclick: () => {
+        if (missing.length && !confirm(`Ainda faltam ${missing.length} item(ns). Concluir assim mesmo?`)) return;
+        const h = lsGet(LS_CKH, []); h.unshift({ ...r, done: Date.now() }); lsSet(LS_CKH, h.slice(0, 50));
+        const d = drafts(); delete d[r.tpl]; lsSet(LS_CKD, d);
+        closeSheet(); toast('Checklist concluído e salvo no histórico'); history.back();
+      } }, '✔ Concluir'),
+      el('button', { onclick: closeSheet }, 'Fechar'))));
 }
 
 // ---------------------------------------------------------------------
@@ -1398,4 +1840,4 @@ if ('serviceWorker' in navigator) {
   }).catch(e => console.warn('SW', e));
 }
 // para testes
-window.__app = { S, V, findCode, get AUTH() { return AUTH; }, sync };
+window.__app = { S, V, findCode, parseIn, frac, get AUTH() { return AUTH; }, sync };

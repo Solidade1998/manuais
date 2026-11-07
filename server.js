@@ -44,6 +44,21 @@ const getEntry = async (env, code) => env.DB.get('code:' + code, { type: 'json' 
 const putEntry = (env, code, e) => env.DB.put('code:' + code, JSON.stringify(e));
 const getDocs = async env => (await env.DB.get('docs', { type: 'json' })) || [];
 
+// Onde ficam os pedaços dos PDFs: no R2 (binding FILES, 10 GB grátis) se
+// estiver ligado; senão no KV (1 GB). Leitura procura nos dois.
+async function partPut(env, key, body) {
+  if (env.FILES) return env.FILES.put(key, body);
+  return env.DB.put(key, body);
+}
+async function partGet(env, key) {
+  if (env.FILES) { const o = await env.FILES.get(key); if (o) return o.body; }
+  return env.DB.get(key, { type: 'stream' });
+}
+async function partDel(env, key) {
+  if (env.FILES) await env.FILES.delete(key).catch(() => {});
+  await env.DB.delete(key).catch(() => {});
+}
+
 // Quem está fazendo o pedido? (token: CÓDIGO.aparelho.assinatura)
 async function whoIs(request, env) {
   const h = request.headers.get('authorization') || '';
@@ -113,7 +128,7 @@ export async function onRequest(context) {
         const d = who.entry.devices[who.dev];
         if (Date.now() - (d.last || 0) > DAY / 4) { d.last = Date.now(); await putEntry(env, who.code, who.entry); }
       }
-      return json({ ok: true, name: who.name, admin: !!who.admin });
+      return json({ ok: true, name: who.name, admin: !!who.admin, storage: env.FILES ? 'R2' : 'KV' });
     }
 
     // ---------------- lista de manuais ----------------
@@ -122,7 +137,7 @@ export async function onRequest(context) {
     // ---------------- baixar pedaço de um manual ----------------
     if (path[0] === 'file' && method === 'GET' && path.length === 4) {
       const [, rid, sha, i] = path;
-      const stream = await env.DB.get(`part:${rid}:${sha}:${i}`, { type: 'stream' });
+      const stream = await partGet(env, `part:${rid}:${sha}:${i}`);
       if (!stream) return fail('Arquivo não encontrado', 404);
       return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, no-store' } });
     }
@@ -182,7 +197,12 @@ export async function onRequest(context) {
       const sha = (url.searchParams.get('sha') || '').replace(/[^a-f0-9]/gi, '');
       const i = parseInt(url.searchParams.get('i'), 10);
       if (!rid || !sha || !(i >= 0)) return fail('Parâmetros inválidos.');
-      await env.DB.put(`part:${rid}:${sha}:${i}`, request.body);
+      try { await partPut(env, `part:${rid}:${sha}:${i}`, request.body); }
+      catch (e) {
+        const m = String(e?.message || e);
+        if (!env.FILES && /limit|quota|exceed|storage/i.test(m)) return fail('O cofre grátis (KV, 1 GB) encheu. Ative o R2 para caber todos os manuais — veja o passo a passo.', 507);
+        throw e;
+      }
       return json({ ok: true });
     }
     // publicar / atualizar dados de um manual
@@ -192,9 +212,9 @@ export async function onRequest(context) {
       const docs = await getDocs(env);
       const old = docs.find(x => x.rid === d.rid);
       const keep = { rid: d.rid, sha: d.sha, parts: d.parts, size: d.size, file: String(d.file || '').slice(0, 200), name: String(d.name || '').slice(0, 120),
-        group: String(d.group || '').slice(0, 60), order: d.order ?? null, cat: d.cat || null, pages: d.pages || null, at: Date.now() };
+        group: String(d.group || '').slice(0, 60), order: d.order ?? null, cat: d.cat || null, brand: d.brand ? String(d.brand).slice(0, 40) : null, pages: d.pages || null, at: Date.now() };
       if (old) {
-        if (old.sha !== d.sha) for (let i = 0; i < old.parts; i++) await env.DB.delete(`part:${old.rid}:${old.sha}:${i}`);
+        if (old.sha !== d.sha) for (let i = 0; i < old.parts; i++) await partDel(env, `part:${old.rid}:${old.sha}:${i}`);
         Object.assign(old, keep);
       } else docs.push(keep);
       await env.DB.put('docs', JSON.stringify(docs));
@@ -208,6 +228,10 @@ export async function onRequest(context) {
       if (!old) return fail('Manual não encontrado.', 404);
       if (d.name != null) old.name = String(d.name).slice(0, 120);
       if (d.group != null) old.group = String(d.group).slice(0, 60);
+      if (d.brand != null) old.brand = String(d.brand).slice(0, 40);
+      if (d.order != null) old.order = +d.order;
+      if (d.cat !== undefined) old.cat = d.cat || null;
+      if (d.mv != null) old.mv = +d.mv;
       old.at = Date.now();
       await env.DB.put('docs', JSON.stringify(docs));
       return json({ ok: true, docs });
@@ -217,7 +241,7 @@ export async function onRequest(context) {
       const docs = await getDocs(env);
       const old = docs.find(x => x.rid === rid);
       if (!old) return json({ ok: true, docs });
-      for (let i = 0; i < old.parts; i++) await env.DB.delete(`part:${old.rid}:${old.sha}:${i}`);
+      for (let i = 0; i < old.parts; i++) await partDel(env, `part:${old.rid}:${old.sha}:${i}`);
       const rest = docs.filter(x => x.rid !== rid);
       await env.DB.put('docs', JSON.stringify(rest));
       return json({ ok: true, docs: rest });
