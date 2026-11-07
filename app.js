@@ -4,7 +4,7 @@
 // =====================================================================
 import * as pdfjsLib from './lib/pdf.min.mjs';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '2.0.0';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './lib/pdf.worker.min.mjs';
 const LIB = new URL('lib/', location.href).href;
 const PDF_OPTS = {
@@ -232,50 +232,172 @@ function fromCatalog(file) {
 }
 
 // ---------------------------------------------------------------------
-//  Importar PDFs
+//  Guardar um PDF no aparelho (vindo da nuvem ou enviado pelo admin)
 // ---------------------------------------------------------------------
-$('#btnImport').onclick = () => $('#fileInput').click();
-$('#fileInput').onchange = async e => {
-  const files = [...e.target.files]; e.target.value = '';
-  if (files.length) await importFiles(files);
+async function addPdfBlob(blob, meta) {
+  const buf = await blob.arrayBuffer();
+  const stored = new Blob([buf], { type: 'application/pdf' }); // cópia antes do pdf.js "consumir" o buffer
+  const task = pdfjsLib.getDocument({ data: new Uint8Array(buf), ...PDF_OPTS });
+  const pdf = await task.promise;
+  const outline = await readOutline(pdf);
+  const pages = pdf.numPages;
+  await task.destroy();
+  const known = fromCatalog(meta.file || '') || {};
+  const doc = {
+    id: uid(), rid: meta.rid || null, sha: meta.sha || null,
+    name: meta.name || known.name || (meta.file || 'Manual').replace(/\.pdf$/i, '').replace(/_+/g, ' ').trim(),
+    file: meta.file || '', group: meta.group ?? known.group ?? '', order: meta.order ?? known.order, cat: meta.cat ?? known.cat,
+    size: blob.size, pages, added: Date.now(), opened: 0, lastPage: 1, outline, favs: [], catFix: {},
+    textDone: false, textProgress: 0,
+  };
+  await dbPut('files', stored, doc.id);
+  await saveDoc(doc);
+  S.docs.push(doc);
+  return doc;
+}
+async function removeLocalDoc(d) {
+  S.docs = S.docs.filter(x => x.id !== d.id); S.texts.delete(d.id);
+  const p = pdfCache.get(d.id); pdfCache.delete(d.id); p?.then(x => x._task.destroy()).catch(() => {});
+  await dbDel('docs', d.id); await dbDel('files', d.id); await dbDel('text', d.id);
+}
+
+// ---------------------------------------------------------------------
+//  Acesso por código
+// ---------------------------------------------------------------------
+const LS_AUTH = 'manuais.auth', LS_DEV = 'manuais.dev';
+const OFFLINE_DAYS = 30; // sem conferir o acesso por mais que isso, o app trava até ter internet
+const lsGet = (k, d = null) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const lsSet = (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+let AUTH = lsGet(LS_AUTH, {});
+function deviceId() {
+  let d = lsGet(LS_DEV);
+  if (!d) { d = 'd' + uid().replace(/-/g, ''); lsSet(LS_DEV, d); }
+  return d;
+}
+async function api(path, opts = {}) {
+  const headers = { ...(opts.headers || {}) };
+  if (AUTH.token) headers.authorization = 'Bearer ' + AUTH.token;
+  let body = opts.body;
+  if (opts.json !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(opts.json); }
+  const r = await fetch('api/' + path, { method: opts.method || (body ? 'POST' : 'GET'), headers, body, cache: 'no-store' });
+  if (opts.raw && r.ok) return r;
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const e = new Error(data.error || 'Erro ' + r.status); e.status = r.status; e.data = data; throw e; }
+  return data;
+}
+
+function showLogin(msg, isError) {
+  show('login');
+  $('#loginMsg').textContent = msg || 'Digite o código de acesso que você recebeu.';
+  $('#loginErr').hidden = true;
+  if (isError) { $('#loginErr').textContent = msg; $('#loginErr').hidden = false; $('#loginMsg').textContent = 'Digite o código de acesso que você recebeu.'; }
+}
+$('#loginCode').addEventListener('keydown', e => e.key === 'Enter' && $('#loginBtn').click());
+$('#loginBtn').onclick = async () => {
+  const code = $('#loginCode').value.trim();
+  if (!code) return;
+  const btn = $('#loginBtn'); btn.disabled = true; btn.textContent = 'Conferindo…'; $('#loginErr').hidden = true;
+  try {
+    const r = await api('login', { json: { code, deviceId: deviceId() } });
+    AUTH = { token: r.token, name: r.name, admin: r.admin, issued: Date.now(), lastOk: Date.now() };
+    lsSet(LS_AUTH, AUTH);
+    $('#loginCode').value = '';
+    await startApp();
+    sync(true);
+  } catch (e) {
+    $('#loginErr').textContent = e.status ? e.message : 'Sem conexão com a internet. Tente de novo com sinal.';
+    $('#loginErr').hidden = false;
+  } finally { btn.disabled = false; btn.textContent = 'Entrar'; }
 };
 
-async function importFiles(files) {
-  navigator.storage?.persist?.().catch(() => {});
-  let ok = 0, last = null;
-  for (let i = 0; i < files.length; i++) {
-    const f = files[i];
-    toast(`Importando ${i + 1} de ${files.length}: ${f.name}`, 0);
-    const name = f.name.replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (S.docs.some(d => d.size === f.size && d.file === f.name)) { toast(`Já existe: ${name}`); await sleep(900); continue; }
-    try {
-      const buf = await f.arrayBuffer();
-      const blob = new Blob([buf], { type: 'application/pdf' });
-      const task = pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)), ...PDF_OPTS });
-      const pdf = await task.promise;
-      const outline = await readOutline(pdf);
-      const known = fromCatalog(f.name) || {};
-      const doc = {
-        id: uid(), name: known.name || name, file: f.name, group: known.group || '', order: known.order, cat: known.cat,
-        size: f.size, pages: pdf.numPages,
-        added: Date.now(), opened: 0, lastPage: 1, outline, favs: [], catFix: {},
-        textDone: false, textProgress: 0,
-      };
-      await task.destroy();
-      await dbPut('files', blob, doc.id);
-      await saveDoc(doc);
-      S.docs.push(doc); ok++; last = doc;
-    } catch (err) {
-      console.error(err);
-      toast(`Erro ao importar ${f.name}: ${err.message || err}`, 5000); await sleep(2500);
-    }
-  }
-  $('#toast').hidden = true;
-  renderHome();
-  if (ok) toast(ok === 1 ? 'Manual adicionado' : `${ok} manuais adicionados`);
-  if (ok === 1 && !fromCatalog(last.file)) editDocSheet(last, true);
-  indexQueue();
+async function wipeAll(reason) {
+  closeViewer(true);
+  for (const d of [...S.docs]) await removeLocalDoc(d).catch(() => {});
+  S.docs = []; S.texts.clear();
+  AUTH = {}; lsSet(LS_AUTH, null);
+  showLogin(reason, true);
 }
+
+// confere se o acesso continua válido (quando tem internet)
+async function checkAccess() {
+  try {
+    const r = await api('me');
+    AUTH.lastOk = Date.now(); AUTH.admin = r.admin; AUTH.name = r.name; lsSet(LS_AUTH, AUTH);
+    $('#btnAdmin').hidden = !AUTH.admin;
+    return true;
+  } catch (e) {
+    if (e.status === 403 && e.data?.revoked && Date.now() - (AUTH.issued || 0) > 5 * 60000) {
+      await wipeAll('Seu acesso foi encerrado. Os manuais foram removidos deste aparelho. Fale com o responsável.');
+      return false;
+    }
+    if (e.status === 401) { await wipeAll('Seu acesso precisa ser refeito. Digite o código novamente.'); return false; }
+    // sem internet: tudo bem, a não ser que esteja há muito tempo sem conferir
+    if (!e.status && Date.now() - (AUTH.lastOk || 0) > OFFLINE_DAYS * 86400000) {
+      showLogin(`Faz mais de ${OFFLINE_DAYS} dias que o app não confere seu acesso. Conecte à internet e abra o app de novo.`);
+      $('#loginCode').value = ''; return false;
+    }
+    return !e.status;
+  }
+}
+
+// ---------------------------------------------------------------------
+//  Sincronizar os manuais com a nuvem
+// ---------------------------------------------------------------------
+const PART = 20 * 1024 * 1024;
+let syncing = false;
+function syncBar(text, frac) {
+  const b = $('#syncBar');
+  if (text == null) { b.hidden = true; return; }
+  b.hidden = false; $('#syncText').textContent = text;
+  $('#syncFill').style.width = Math.round((frac || 0) * 100) + '%';
+}
+async function sync(manual) {
+  if (syncing || !AUTH.token) return; syncing = true;
+  try {
+    if (!(await checkAccess())) return;
+    let remote;
+    try { remote = (await api('docs')).docs; }
+    catch (e) { if (manual) toast(e.status ? e.message : 'Sem internet — usando os manuais já baixados.'); return; }
+    navigator.storage?.persist?.().catch(() => {});
+    const byRid = new Map(S.docs.filter(d => d.rid).map(d => [d.rid, d]));
+    // removidos da nuvem → sai do aparelho
+    for (const d of S.docs.filter(d => d.rid && !remote.some(r => r.rid === d.rid))) await removeLocalDoc(d);
+    // nome/grupo mudou → só atualiza
+    for (const r of remote) {
+      const d = byRid.get(r.rid);
+      if (d && d.sha === r.sha && (d.name !== r.name || d.group !== r.group || d.order !== r.order || d.cat !== r.cat)) {
+        Object.assign(d, { name: r.name, group: r.group, order: r.order, cat: r.cat, _cats: null }); await saveDoc(d);
+      }
+    }
+    const todo = remote.filter(r => byRid.get(r.rid)?.sha !== r.sha).sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+    if (!todo.length) { if (manual) toast('Manuais em dia ✔'); return; }
+    const total = todo.reduce((a, r) => a + r.size, 0); let done = 0;
+    for (let k = 0; k < todo.length; k++) {
+      const r = todo[k];
+      const chunks = [];
+      for (let i = 0; i < r.parts; i++) {
+        syncBar(`Baixando manuais ${k + 1} de ${todo.length} · ${fmtMB(done)} de ${fmtMB(total)}`, done / total);
+        const res = await api(`file/${r.rid}/${r.sha}/${i}`, { raw: true });
+        const b = await res.blob(); chunks.push(b); done += b.size;
+      }
+      syncBar(`Preparando ${r.name}…`, done / total);
+      const old = byRid.get(r.rid);
+      const doc = await addPdfBlob(new Blob(chunks, { type: 'application/pdf' }), r);
+      if (old) { doc.favs = old.favs; doc.lastPage = old.lastPage; doc.opened = old.opened; await saveDoc(doc); await removeLocalDoc(old); }
+      renderHome(true);
+    }
+    toast(todo.length === 1 ? 'Manual atualizado' : `${todo.length} manuais baixados`);
+  } catch (e) {
+    console.error('sync', e);
+    toast('Download interrompido: ' + (e.status ? e.message : 'sem internet') + '. Toque em ⟳ para continuar.', 6000);
+  } finally {
+    syncing = false; syncBar(null);
+    if ($('#home').classList.contains('active')) renderHome(true);
+    indexQueue();
+  }
+}
+$('#btnSync').onclick = () => sync(true);
+window.addEventListener('online', () => sync());
 
 // ---------------------------------------------------------------------
 //  Indexação do texto (para a busca) — roda em segundo plano, uma vez
@@ -515,6 +637,7 @@ function go(state) { history.pushState(state, ''); route(state); }
 async function route(st) {
   st ||= { s: 'home' };
   closeSheet();
+  if (!AUTH.token) return showLogin();
   if (st.s === 'home') { closeViewer(); show('home'); renderHome(); restoreScroll('home', '#homeBody'); }
   else if (st.s === 'manual') {
     closeViewer();
@@ -523,6 +646,7 @@ async function route(st) {
     if (!same) { S.mq = ''; $('#manualSearch').value = ''; S.scroll.manual = 0; }
     show('manual'); renderManual(); restoreScroll('manual', '#manualBody');
   } else if (st.s === 'viewer') { show('viewer'); await startViewer(st); }
+  else if (st.s === 'admin') { closeViewer(); show('admin'); renderAdmin(); }
 }
 function restoreScroll(scr, sel) { const y = S.scroll[scr] || 0; requestAnimationFrame(() => ($(sel).scrollTop = y)); }
 window.addEventListener('popstate', e => route(e.state));
@@ -556,8 +680,9 @@ function renderHome(keepScroll) {
   if (!S.docs.length) {
     box.append(el('div', { class: 'empty' },
       el('div', { class: 'big' }, '📚'),
-      el('p', { html: 'Nenhum manual ainda.<br>Toque em <b>＋ PDF</b> e escolha os manuais no celular.<br>Pode selecionar vários de uma vez.' }),
-      el('p', { html: 'Eles ficam guardados <b>dentro do app</b>, funcionam sem internet e não são enviados para lugar nenhum.' })));
+      AUTH.admin
+        ? el('p', { html: 'Nenhum manual na nuvem ainda.<br>Toque em <b>Painel</b> → <b>Enviar PDFs</b> para publicar os manuais para a equipe.' })
+        : el('p', { html: 'Os manuais vão baixar automaticamente quando houver internet.<br>Toque em <b>⟳</b> para tentar agora.<br><br>Depois de baixados, funcionam <b>sem internet</b>.' })));
     return;
   }
   if (S.q.trim()) { renderSearch(box, S.q); return; }
@@ -604,7 +729,7 @@ function byOrder(a, b) { return (a.order ?? 999) - (b.order ?? 999) || a.name.lo
 function docCard(d) {
   const meta = `${d.pages} pág.` + (d.outline?.length ? '' : d.auto?.length ? ' · sumário auto' : ' · sem sumário');
   return el('div', { class: 'card', role: 'button', onclick: e => { if (!e.target.closest('.more')) go({ s: 'manual', id: d.id }); } },
-    el('button', { class: 'more', 'aria-label': 'Opções', onclick: () => editDocSheet(d) }, '⋯'),
+    AUTH.admin ? el('button', { class: 'more', 'aria-label': 'Opções', onclick: () => editDocSheet(d) }, '⋯') : null,
     el('div', { class: 'name' }, d.name),
     !d.textDone && !d.textFail ? el('div', { class: 'bar' }, el('i', { 'data-prog': d.id, style: `width:${Math.round(d.textProgress * 100)}%` })) : null,
     el('div', { class: 'meta' }, d.textFail ? '⚠ busca indisponível' : meta));
@@ -731,36 +856,39 @@ function openSheet(content) {
 function closeSheet() { $('#sheet').hidden = true; }
 $('#sheet').addEventListener('click', e => { if (e.target.id === 'sheet') closeSheet(); });
 
-function editDocSheet(d, isNew) {
+function editDocSheet(d) {
   const groups = [...new Set(S.docs.map(x => x.group).filter(Boolean))].sort();
   const name = el('input', { value: d.name });
-  const group = el('input', { value: d.group, list: 'grpList', placeholder: 'ex.: Corretiva, Preventiva, Perfuratriz…' });
+  const group = el('input', { value: d.group, list: 'grpList', placeholder: 'ex.: MHC80 — Manuais' });
   const dl = el('datalist', { id: 'grpList' }, groups.map(g => el('option', { value: g })));
   const chips = el('div', { class: 'chips', style: 'padding:6px 0' }, groups.map(g => el('button', { class: 'chip', onclick: () => (group.value = g) }, g)));
   openSheet(el('div', {},
-    el('h4', {}, isNew ? 'Novo manual' : 'Editar manual'),
+    el('h4', {}, 'Editar manual'),
+    d.rid ? el('p', { class: 'muted small', style: 'margin:0' }, 'As mudanças valem para todos da equipe.') : null,
     el('label', {}, 'Nome que aparece no app'), name,
-    el('label', {}, 'Grupo (opcional)'), group, dl, groups.length ? chips : null,
+    el('label', {}, 'Grupo'), group, dl, groups.length ? chips : null,
     el('div', { class: 'acts' },
       el('button', { class: 'ok', onclick: async () => {
-        d.name = name.value.trim() || d.name; d.group = group.value.trim();
-        await saveDoc(d); closeSheet(); renderHome(true);
+        const nn = name.value.trim() || d.name, ng = group.value.trim();
+        try { if (d.rid) await api('admin/docmeta', { json: { rid: d.rid, name: nn, group: ng } }); }
+        catch (e) { toast('Não salvou: ' + (e.status ? e.message : 'sem internet'), 4000); return; }
+        d.name = nn; d.group = ng; await saveDoc(d); closeSheet(); renderHome(true); if ($('#admin').classList.contains('active')) renderAdmin();
       } }, 'Salvar'),
-      isNew ? null : el('button', { onclick: () => confirmDelete(d) , class: 'danger' }, 'Excluir'),
+      el('button', { onclick: () => confirmDelete(d), class: 'danger' }, d.rid ? 'Remover para todos' : 'Excluir'),
       d.textFail ? el('button', { onclick: async () => { delete d.textFail; await saveDoc(d); closeSheet(); renderHome(true); indexQueue(); } }, 'Tentar busca de novo') : null,
       el('button', { onclick: closeSheet }, 'Cancelar'))));
 }
 function confirmDelete(d) {
   openSheet(el('div', {},
-    el('h4', {}, 'Excluir “' + d.name + '”?'),
-    el('p', { style: 'color:var(--muted)' }, 'O PDF sai do app (o arquivo original no seu celular continua lá). Favoritos deste manual também somem.'),
+    el('h4', {}, 'Remover “' + d.name + '”?'),
+    el('p', { class: 'muted' }, d.rid ? 'O manual sai da nuvem e some do celular de todos da equipe na próxima vez que abrirem o app com internet.' : 'O manual sai deste aparelho.'),
     el('div', { class: 'acts' },
       el('button', { class: 'danger', onclick: async () => {
-        S.docs = S.docs.filter(x => x.id !== d.id); S.texts.delete(d.id);
-        const p = pdfCache.get(d.id); pdfCache.delete(d.id); p?.then(x => x._task.destroy()).catch(() => {});
-        await dbDel('docs', d.id); await dbDel('files', d.id); await dbDel('text', d.id);
-        closeSheet(); renderHome(); toast('Manual excluído');
-      } }, 'Excluir'),
+        try { if (d.rid) await api('admin/docdelete', { json: { rid: d.rid } }); }
+        catch (e) { toast('Não removeu: ' + (e.status ? e.message : 'sem internet'), 4000); return; }
+        await removeLocalDoc(d);
+        closeSheet(); renderHome(); if ($('#admin').classList.contains('active')) renderAdmin(); toast('Manual removido');
+      } }, 'Remover'),
       el('button', { onclick: closeSheet }, 'Cancelar'))));
 }
 
@@ -1024,17 +1152,194 @@ $('#btnMark').onclick = () => {
 };
 
 // ---------------------------------------------------------------------
+//  Painel do administrador
+// ---------------------------------------------------------------------
+$('#btnAdmin').onclick = () => go({ s: 'admin' });
+const ago = t => {
+  if (!t) return 'nunca';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 2) return 'agora'; if (m < 60) return `há ${m} min`;
+  const h = Math.round(m / 60); if (h < 24) return `há ${h} h`;
+  const d = Math.round(h / 24); return d === 1 ? 'ontem' : `há ${d} dias`;
+};
+const appUrl = () => location.origin + location.pathname.replace(/index\.html$/, '');
+function inviteText(c) {
+  return `Olá, ${c.name}! Seu acesso ao app *Manuais da Manutenção*:\n\n` +
+    `1️⃣ Abra este link no celular: ${appUrl()}\n` +
+    `2️⃣ Instale o app:\n   • Android (Chrome): menu ⋮ → *Adicionar à tela inicial*\n   • iPhone (Safari): Compartilhar → *Adicionar à Tela de Início*\n` +
+    `3️⃣ Abra o app pelo ícone e digite o código:\n\n*${c.pretty}*\n\n` +
+    `Os manuais baixam sozinhos (use Wi-Fi, são cerca de ${fmtMB(S.docs.reduce((a, d) => a + (d.rid ? d.size : 0), 0) || 140 * 1048576)}). ` +
+    `O código é pessoal e funciona em até ${c.max} celular${c.max > 1 ? 'es' : ''}. Não repasse.`;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); toast('Copiado'); }
+  catch { const a = el('textarea', {}, t); document.body.append(a); a.select(); document.execCommand('copy'); a.remove(); toast('Copiado'); }
+}
+
+let ADM = { codes: [], docs: [] };
+async function renderAdmin() {
+  const box = $('#adminBody');
+  if (!ADM.loaded) box.innerHTML = '<div class="empty">Carregando…</div>';
+  try {
+    const [c, d] = await Promise.all([api('admin/codes'), api('docs')]);
+    ADM = { codes: c.codes, docs: d.docs, loaded: true };
+  } catch (e) {
+    box.innerHTML = ''; box.append(el('div', { class: 'note' }, 'Não consegui falar com o servidor: ' + (e.status ? e.message : 'sem internet') + '.'));
+    return;
+  }
+  box.innerHTML = '';
+  // ---- acessos ----
+  box.append(el('h3', { class: 'sec' }, `Acessos da equipe (${ADM.codes.length})`));
+  box.append(el('button', { class: 'row', style: 'justify-content:center;font-weight:700;color:var(--accent2)', onclick: newCodeSheet }, '＋ Novo acesso'));
+  for (const c of ADM.codes) {
+    const n = Object.keys(c.devices || {}).length;
+    const last = Math.max(0, ...Object.values(c.devices || {}).map(v => v.last || 0));
+    const recentTry = (c.attempts || []).filter(a => Date.now() - a.at < 30 * 86400000).length;
+    box.append(el('button', { class: 'row', onclick: async () => { await renderAdmin(); codeSheet(ADM.codes.find(x => x.code === c.code) || c); } },
+      el('div', { class: 'main' },
+        el('div', { class: 't' }, c.name,
+          c.blocked ? el('span', { class: 'badge red' }, 'Bloqueado') : n ? el('span', { class: 'badge ok' }, 'Ativo') : el('span', { class: 'badge warn' }, 'Não usado'),
+          recentTry ? el('span', { class: 'badge red' }, `⚠ ${recentTry} tentativa${recentTry > 1 ? 's' : ''}`) : null),
+        el('div', { class: 's' }, `${c.pretty} · ${n}/${c.max} celular${c.max > 1 ? 'es' : ''} · último uso: ${ago(last)}`)),
+      el('div', { class: 'pg' }, '›')));
+  }
+  // ---- manuais ----
+  const total = ADM.docs.reduce((a, d) => a + d.size, 0);
+  box.append(el('h3', { class: 'sec' }, `Manuais na nuvem (${ADM.docs.length} · ${fmtMB(total)})`));
+  box.append(el('button', { class: 'row', style: 'justify-content:center;font-weight:700;color:var(--accent2)', onclick: () => $('#fileInput').click() }, '＋ Enviar PDFs (novos ou atualizados)'));
+  box.append(el('div', { class: 'note' }, 'Dica: envie pelo computador, é mais rápido. Se mandar um PDF com o mesmo nome de arquivo de um que já está na nuvem, ele substitui o antigo para todos (os favoritos de cada um são mantidos).'));
+  for (const r of [...ADM.docs].sort((a, b) => (a.order ?? 999) - (b.order ?? 999) || a.name.localeCompare(b.name, 'pt'))) {
+    const local = S.docs.find(d => d.rid === r.rid);
+    box.append(el('button', { class: 'row', onclick: () => local ? editDocSheet(local) : toast('Este manual ainda está baixando neste aparelho') },
+      el('div', { class: 'main' }, el('div', { class: 't' }, r.name), el('div', { class: 's' }, `${r.group || 'sem grupo'} · ${fmtMB(r.size)}${r.pages ? ' · ' + r.pages + ' pág.' : ''}`)),
+      el('div', { class: 'pg' }, '⋯')));
+  }
+  box.append(el('div', { class: 'empty small', style: 'padding:20px 0 0' }, `Endereço do app: ${appUrl()}`));
+}
+
+function newCodeSheet() {
+  const name = el('input', { placeholder: 'ex.: João – turno B' });
+  let max = 1;
+  const seg = el('div', { class: 'seg' }, [1, 2, 3].map(n => el('button', { class: n === 1 ? 'on' : '', onclick: e => { max = n; seg.querySelectorAll('button').forEach(b => b.classList.toggle('on', b === e.target)); } }, n + (n > 1 ? ' celulares' : ' celular'))));
+  const create = async () => {
+    if (!name.value.trim()) return name.focus();
+    try {
+      const c = await api('admin/codes', { json: { name: name.value.trim(), max } });
+      await renderAdmin(); codeSheet(c, true);
+    } catch (e) { toast(e.status ? e.message : 'Sem internet', 4000); }
+  };
+  name.addEventListener('keydown', e => e.key === 'Enter' && create());
+  openSheet(el('div', {}, el('h4', {}, 'Novo acesso'),
+    el('label', {}, 'Nome da pessoa'), name,
+    el('label', {}, 'Em quantos celulares o código pode funcionar'), seg,
+    el('div', { class: 'acts' }, el('button', { class: 'ok', onclick: create }, 'Criar código'), el('button', { onclick: closeSheet }, 'Cancelar'))));
+  setTimeout(() => name.focus(), 50);
+}
+
+function codeSheet(c, fresh) {
+  const act = async (action, extra = {}, confirmMsg) => {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    try { const r = await api('admin/code', { json: { code: c.code, action, ...extra } }); await renderAdmin(); if (!r.deleted) codeSheet(ADM.codes.find(x => x.code === c.code) || r); else { closeSheet(); toast('Acesso excluído'); } }
+    catch (e) { toast(e.status ? e.message : 'Sem internet', 4000); }
+  };
+  const devs = Object.entries(c.devices || {});
+  const seg = el('div', { class: 'seg' }, [1, 2, 3].map(n => el('button', { class: n === c.max ? 'on' : '', onclick: () => act('setMax', { max: n }) }, String(n))));
+  openSheet(el('div', {},
+    el('h4', {}, c.name, c.blocked ? el('span', { class: 'badge red' }, 'Bloqueado') : null),
+    fresh ? el('p', { class: 'muted', style: 'margin:0' }, 'Código criado! Envie para a pessoa:') : null,
+    el('div', { class: 'bigcode' }, c.pretty),
+    el('div', { class: 'acts' },
+      el('button', { class: 'ok', onclick: () => window.open('https://wa.me/?text=' + encodeURIComponent(inviteText(c)), '_blank') }, '📲 Enviar pelo WhatsApp'),
+      el('button', { onclick: () => copyText(inviteText(c)) }, 'Copiar mensagem')),
+    el('label', {}, `Celulares usando este código (${devs.length} de ${c.max})`),
+    devs.length ? el('div', {}, devs.map(([id, v]) => el('div', { class: 'devrow' },
+      el('div', {}, el('div', {}, v.label || 'Aparelho'), el('div', { class: 'muted small' }, `desde ${new Date(v.first).toLocaleDateString('pt-BR')} · último uso ${ago(v.last)}`)),
+      el('button', { onclick: () => act('removeDevice', { deviceId: id }, `Remover este celular? Os manuais serão apagados dele na próxima vez que abrir com internet.`) }, 'Remover'))))
+      : el('p', { class: 'muted small' }, 'Ainda não foi usado.'),
+    (c.attempts || []).length ? el('div', {},
+      el('label', {}, 'Tentativas bloqueadas (outro celular tentou usar o código)'),
+      ...(c.attempts || []).slice(0, 5).map(a => el('div', { class: 'muted small' }, `⚠ ${new Date(a.at).toLocaleString('pt-BR')} · ${a.label}`))) : null,
+    el('label', {}, 'Limite de celulares'), seg,
+    el('div', { class: 'acts' },
+      c.blocked
+        ? el('button', { class: 'ok', onclick: () => act('unblock') }, 'Desbloquear')
+        : el('button', { class: 'danger', onclick: () => act('block', {}, `Bloquear ${c.name}? Os manuais serão apagados do celular dele na próxima vez que abrir o app com internet.`) }, 'Bloquear'),
+      devs.length ? el('button', { onclick: () => act('reset', {}, 'Liberar todas as vagas? (use quando a pessoa trocar de celular)') }, 'Liberar vagas') : null,
+      el('button', { class: 'danger', onclick: () => act('delete', {}, `Excluir o acesso de ${c.name} de vez?`) }, 'Excluir'),
+      el('button', { onclick: closeSheet }, 'Fechar'))));
+}
+
+// ---- enviar PDFs para a nuvem ----
+$('#fileInput').onchange = async e => {
+  const files = [...e.target.files]; e.target.value = '';
+  if (files.length) await uploadFiles(files);
+};
+async function sha16(buf) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+  return [...h.slice(0, 8)].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+const slug = s => norm(s).replace(/\.pdf$/, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'manual';
+async function uploadFiles(files) {
+  let remote;
+  try { remote = (await api('docs')).docs; } catch (e) { toast(e.status ? e.message : 'Sem internet', 4000); return; }
+  const status = el('div', { class: 'progress' }); const bar = el('div', { class: 'bar', style: 'height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:8px' }, el('i', { style: 'display:block;height:100%;width:0;background:var(--accent)' }));
+  openSheet(el('div', {}, el('h4', {}, 'Enviando para a nuvem'), status, bar, el('p', { class: 'muted small' }, 'Não feche o app até terminar.')));
+  const total = files.reduce((a, f) => a + f.size, 0); let sent = 0, ok = 0;
+  for (let k = 0; k < files.length; k++) {
+    const f = files[k];
+    try {
+      const buf = await f.arrayBuffer();
+      const sha = await sha16(buf);
+      const old = remote.find(r => r.file === f.name);
+      if (old && old.sha === sha) { sent += f.size; status.textContent = `${f.name}: já está na nuvem`; continue; }
+      const rid = old?.rid || slug(f.name) + '-' + Math.random().toString(36).slice(2, 6);
+      const parts = Math.max(1, Math.ceil(buf.byteLength / PART));
+      for (let i = 0; i < parts; i++) {
+        status.textContent = `Enviando ${k + 1} de ${files.length}: ${f.name}` + (parts > 1 ? ` (parte ${i + 1}/${parts})` : '');
+        bar.firstChild.style.width = Math.round((sent / total) * 100) + '%';
+        const piece = buf.slice(i * PART, Math.min((i + 1) * PART, buf.byteLength));
+        await api(`admin/part?rid=${rid}&sha=${sha}&i=${i}`, { method: 'PUT', body: piece, headers: { 'content-type': 'application/octet-stream' } });
+        sent += piece.byteLength;
+      }
+      // guarda também neste aparelho (sem baixar de novo)
+      const localOld = S.docs.find(d => d.rid === rid);
+      const known = fromCatalog(f.name) || {};
+      const meta = { rid, sha, file: f.name, name: old?.name || known.name, group: old?.group ?? known.group, order: old?.order ?? known.order, cat: old?.cat ?? known.cat };
+      const doc = await addPdfBlob(new Blob([buf], { type: 'application/pdf' }), meta);
+      if (localOld) { doc.favs = localOld.favs; doc.lastPage = localOld.lastPage; await saveDoc(doc); await removeLocalDoc(localOld); }
+      const r = await api('admin/doc', { json: { rid, sha, parts, size: f.size, file: f.name, name: doc.name, group: doc.group, order: doc.order ?? null, cat: doc.cat ?? null, pages: doc.pages } });
+      remote = r.docs; ok++;
+    } catch (e) {
+      console.error(e);
+      toast(`Erro em ${f.name}: ${e.status ? e.message : 'sem internet'}`, 6000); await sleep(2000);
+    }
+  }
+  bar.firstChild.style.width = '100%';
+  closeSheet(); toast(`${ok} manual(is) publicado(s) para a equipe`, 4000);
+  renderAdmin(); renderHome(true); indexQueue();
+}
+
+// ---------------------------------------------------------------------
 //  Início
 // ---------------------------------------------------------------------
-async function boot() {
-  try { S.docs = await dbAll('docs'); }
-  catch (e) { toast('Erro ao abrir o banco de dados: ' + e.message, 8000); S.docs = []; }
-  for (const d of S.docs) { d.favs ||= []; d.catFix ||= {}; }
+let started = false;
+async function startApp() {
+  $('#btnAdmin').hidden = !AUTH.admin;
+  if (!started) {
+    started = true;
+    try { S.docs = await dbAll('docs'); }
+    catch (e) { toast('Erro ao abrir o banco de dados: ' + e.message, 8000); S.docs = []; }
+    for (const d of S.docs) { d.favs ||= []; d.catFix ||= {}; delete d.textFail; } // tenta de novo a cada abertura
+    loadTexts(S.docs.filter(d => d.textDone).map(d => d.id)).catch(() => {});
+  }
   history.replaceState({ s: 'home' }, '');
   route({ s: 'home' });
-  // texto dos manuais prontos fica na memória para a busca ser instantânea
-  loadTexts(S.docs.filter(d => d.textDone).map(d => d.id)).catch(() => {});
   indexQueue();
+}
+async function boot() {
+  if (!AUTH.token) { showLogin(); return; }
+  await startApp();
+  sync();
 }
 boot();
 
@@ -1052,4 +1357,4 @@ if ('serviceWorker' in navigator) {
   }).catch(e => console.warn('SW', e));
 }
 // para testes
-window.__app = { S, V, importFiles };
+window.__app = { S, V, get AUTH() { return AUTH; }, sync };

@@ -1,6 +1,6 @@
 // Guarda o app no celular para funcionar sem internet.
 // Ao mudar qualquer arquivo do app, aumente a versão abaixo.
-const VERSION = 'manuais-v1.0.0';
+const VERSION = 'manuais-v2.0.0';
 const CORE = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'lib/pdf.min.mjs', 'lib/pdf.worker.min.mjs',
@@ -16,7 +16,8 @@ self.addEventListener('activate', e => {
 });
 self.addEventListener('fetch', e => {
   const req = e.request;
-  if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
+  const url = new URL(req.url);
+  if (req.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return; // servidor: sempre direto
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then(hit => hit || fetch(req).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }

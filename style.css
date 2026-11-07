@@ -98,3 +98,23 @@ mark{background:var(--accent2);color:#111;border-radius:3px;padding:0 2px}
 .sheet-card .acts .danger{background:#5b1d1d;color:#ffb4b4}
 .sheet-card .opt{display:block;width:100%;text-align:left;padding:14px 12px;border-radius:10px;background:var(--panel2);margin-bottom:8px;font-weight:600}
 .toast{position:fixed;left:50%;bottom:calc(80px + var(--safe-bot));transform:translateX(-50%);background:#000d;color:#fff;padding:10px 16px;border-radius:10px;z-index:60;max-width:90vw;text-align:center}
+
+/* acesso */
+.login-box{margin:auto;width:100%;max-width:420px;padding:24px 22px calc(24px + var(--safe-bot));text-align:center}
+.login-box h1{font-size:22px;margin:14px 0 6px}
+.login-box img{border-radius:20px}
+.login-box input{width:100%;margin:18px 0 12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:16px;font-size:22px;text-align:center;letter-spacing:.08em;text-transform:uppercase}
+.btn-accent.big{width:100%;padding:16px;font-size:18px;border-radius:12px}
+.muted{color:var(--muted)} .small{font-size:13px}
+.err{color:#ffb4b4;background:#5b1d1d55;border-radius:10px;padding:10px}
+.syncbar{margin:0 12px 6px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:14px;color:var(--accent2)}
+.syncbar[hidden]{display:none}
+.syncbar .bar{height:5px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:6px}
+.syncbar .bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.badge{display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;margin-left:6px;font-weight:700}
+.badge.red{background:#5b1d1d;color:#ffb4b4} .badge.ok{background:#15361f;color:#a7f3c0} .badge.warn{background:#4a3410;color:var(--accent2)}
+.bigcode{font-size:30px;font-weight:800;letter-spacing:.08em;text-align:center;padding:14px;background:var(--panel2);border-radius:12px;margin:6px 0 4px;user-select:all}
+.devrow{display:flex;align-items:center;gap:8px;padding:10px 0;border-bottom:1px solid var(--line)}
+.devrow div{flex:1}
+.devrow button{padding:8px 10px;border-radius:8px;background:var(--panel2)}
+.seg{display:flex;gap:6px}.seg button{flex:1;padding:10px;border-radius:10px;background:var(--panel2);font-weight:700}.seg button.on{background:var(--accent);color:#1b1b1b}

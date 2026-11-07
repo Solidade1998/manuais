@@ -20,7 +20,8 @@
 <section id="home" class="screen active">
   <header class="topbar">
     <h1>Manuais</h1>
-    <button id="btnImport" class="btn-accent" aria-label="Adicionar PDFs">＋ PDF</button>
+    <button id="btnSync" class="btn-ghost" aria-label="Atualizar manuais">⟳</button>
+    <button id="btnAdmin" class="btn-accent" hidden>Painel</button>
     <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
   </header>
   <div class="searchbox">
@@ -29,7 +30,30 @@
     <button id="searchClear" class="clear" hidden aria-label="Limpar">✕</button>
   </div>
   <nav id="chips" class="chips"></nav>
+  <div id="syncBar" class="syncbar" hidden><div id="syncText"></div><div class="bar"><i id="syncFill"></i></div></div>
   <div id="homeBody" class="body"></div>
+</section>
+
+<!-- ============ CÓDIGO DE ACESSO ============ -->
+<section id="login" class="screen">
+  <div class="login-box">
+    <img src="icons/icon-192.png" alt="" width="84" height="84">
+    <h1>Manuais da Manutenção</h1>
+    <p id="loginMsg" class="muted">Digite o código de acesso que você recebeu.</p>
+    <input id="loginCode" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="MHC-XXXXXX" enterkeyhint="go">
+    <button id="loginBtn" class="btn-accent big">Entrar</button>
+    <p id="loginErr" class="err" hidden></p>
+    <p class="muted small">O código é pessoal. Não repasse para outras pessoas.</p>
+  </div>
+</section>
+
+<!-- ============ PAINEL DO ADMINISTRADOR ============ -->
+<section id="admin" class="screen">
+  <header class="topbar">
+    <button class="back" data-back aria-label="Voltar">‹</button>
+    <h2 class="title">Painel do administrador</h2>
+  </header>
+  <div id="adminBody" class="body"></div>
 </section>
 
 <!-- ============ SUMÁRIO DO MANUAL ============ -->
