@@ -502,10 +502,10 @@ function vSummary(insp,items,st,ttl){
 
 function vReg(){
   const insp=S.insps[V.id]; if(!insp){ V={v:'home'}; return vHome(); }
-  const c=CAT[insp.cat], reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok');
+  const c=CAT[insp.cat], reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok'&&(!V.only||i.key===V.only));
   window.__sugR={};
-  let html=topBar(`Registro de tráfego · <b>MHC80-${h(insp.mhc)}</b>`,true)+`<div class="stack">
-   <p class="muted" style="margin:0">${c.nome} · ${fmt(insp.inicio)}. Tudo salva sozinho enquanto você digita. Pode sair e voltar depois.</p>`;
+  let html=topBar(`${V.only?'Solicitação de tráfego':'Registro de tráfego'} · <b>MHC80-${h(insp.mhc)}</b>`,true)+`<div class="stack">
+   <p class="muted" style="margin:0">${V.only?'Pré-preenchimento para não esquecer. Dá para completar depois no final do checklist.':c.nome+' · '+fmt(insp.inicio)+'. Tudo salva sozinho enquanto você digita. Pode sair e voltar depois.'}</p>`;
   if(!reg.length) html+=`<p>Nenhum item Não Ok nesta inspeção.</p>`;
   reg.forEach(i=>{ const a=insp.ans[i.key]; const sg=learned(insp,i); window.__sugR[i.key]=sg; const k=i.key;
     html+=`<section class="card stack regcard" style="gap:10px">
@@ -518,7 +518,8 @@ function vReg(){
       <div class="fld"><label for="f${k}d">Nº OS / Ocorrência</label><input id="f${k}d" data-rk="${k}" data-f="os" value="${h(a.os)}"></div></div>
       <label class="chk"><input type="checkbox" data-rk="${k}" data-f="corr" ${a.corr?'checked':''}> Corrigido na hora</label>
     </section>`; });
-  html+=`<button class="btn alt full" data-act="sheet" data-id="${insp.id}">Ver folha completa</button></div>`;
+  html+= V.only? `<button class="btn y full" data-act="regBack">Salvar e voltar ao checklist</button></div>`
+    : `<button class="btn alt full" data-act="sheet" data-id="${insp.id}">Ver folha completa</button></div>`;
   return html;
 }
 
@@ -561,6 +562,16 @@ function vSheet(){
   return html;
 }
 
+function vAsk(){
+  if(V.v!=='wiz'||!V.ask) return '';
+  const insp=curInsp(); const it=insp&&scoped(insp).find(i=>i.key===V.ask); if(!it) return '';
+  return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="askT"><div class="card stack">
+   <span class="pill p-nok" style="align-self:flex-start">Seq ${h(it.seq)} · Não Ok</span>
+   <h3 id="askT">Deseja comentar a falha agora?</h3>
+   <p class="small muted" style="margin:0">${h(it.atv)}</p>
+   <button class="btn danger full" data-act="askYes">Sim, comentar a falha</button>
+   <button class="btn ghost full" data-act="askNo">Não, seguir o checklist</button></div></div>`;
+}
 function vConfirm(){
   if(!V.confirm) return '';
   const i=S.insps[V.confirm];
@@ -596,7 +607,7 @@ function render(){
     case 'reg': html=vReg(); break;
     default: html=vHome();
   }
-  $app.innerHTML=html+vConfirm();
+  $app.innerHTML=html+vConfirm()+vAsk();
 }
 function softRender(){
   const ae=document.activeElement;
@@ -616,6 +627,7 @@ function goMhc(){
 function back(){
   if(V.v==='mhc') go({v:'home'});
   else if(V.v==='cat'){ draft=null; go({v:'mhc',mhc:V.mhc}); }
+  else if(V.v==='reg'&&V.only) go({v:'wiz',id:V.id,pos:V.ret});
   else if(V.v==='wiz'||V.v==='sheet'||V.v==='reg'){ const i=curInsp(); go(i?{v:'cat',mhc:i.mhc,cat:i.cat}:{v:'home'}); }
   else go({v:'home'});
 }
@@ -646,6 +658,10 @@ document.addEventListener('click',e=>{
   }
   if(act==='sheet') return go({v:'sheet',id:b.dataset.id});
   if(act==='reg') return go({v:'reg',id:b.dataset.id});
+  if(act==='askNo'){ V.ask=null; V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='askYes'){ const k=V.ask; go({v:'reg',id:V.id,only:k,ret:V.pos+1});
+    const f=document.getElementById('f'+k+'a'); if(f) f.focus(); return; }
+  if(act==='regBack') return go({v:'wiz',id:V.id,pos:V.ret});
   if(act==='sugR'){
     const s=((window.__sugR||{})[b.dataset.k]||[])[+b.dataset.i]; if(!s) return;
     const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
@@ -656,6 +672,7 @@ document.addEventListener('click',e=>{
   if(act==='ans'){
     const insp=curInsp(), it=scoped(insp)[V.pos], r=b.dataset.r;
     const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; touch(insp);
+    if(r==='nok'){ V.ask=it.key; render(); return; }
     V.pos++; render(); window.scrollTo(0,0);
     return;
   }
