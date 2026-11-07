@@ -6,7 +6,7 @@
   "assets": { "directory": "./", "binding": "ASSETS" },
   "kv_namespaces": [
     // Troque o texto abaixo pelo "ID" do KV manuais-db (Storage & Databases → KV)
-    { "binding": "DB", "id": "COLE_AQUI_O_ID_DO_KV" }
+    { "binding": "DB", "id": "5f791e53278340e69eb90ee7de408d30" }
   ],
   "keep_vars": true
 }
