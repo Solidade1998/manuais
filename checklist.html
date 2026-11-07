@@ -335,7 +335,7 @@ async function loadTeam(){
 }
 async function openRemote(code,id){
   toast('Abrindo…');
-  try{ TEAM.insp=(await api('admin/ck/'+encodeURIComponent(code)+'/'+encodeURIComponent(id))).insp; go({v:'sheet',ro:true,back:Object.assign({},V)}); }
+  try{ TEAM.code=code; TEAM.insp=(await api('admin/ck/'+encodeURIComponent(code)+'/'+encodeURIComponent(id))).insp; go({v:'sheet',ro:true,back:Object.assign({},V)}); }
   catch(e){ toast(e.status?e.message:'Sem internet'); }
 }
 
@@ -428,7 +428,7 @@ function cardInsp(i){
     ${i.rota==='ligdes'&&scoped(i).some(x=>x.cond===DES&&!(i.ans[x.key]||{}).r)?'<div class="small" style="color:var(--warn);font-weight:700">Rota desligada em aberto</div>':''}
     <div class="small muted">Início ${fmt(i.inicio)} · ${st.done} de ${st.tot} respondidos${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}${st.falta?` · <b style="color:var(--warn)">registro pendente</b>`:''}</div>
     ${bar(st)}
-    <div class="row"><button class="btn y" data-act="wiz" data-id="${i.id}">Continuar</button><button class="btn alt" data-act="sheet" data-id="${i.id}">Ver folha</button></div>
+    <div class="row"><button class="btn y" data-act="wiz" data-id="${i.id}">Continuar</button><button class="btn alt" data-act="sheet" data-id="${i.id}">Ver folha</button><button class="btn ghost" data-act="askDel" data-id="${i.id}">Apagar</button></div>
   </div>`;
 }
 
@@ -598,6 +598,7 @@ function vSheet(){
       return `<tr class="${cp?'done':''}"><td class="seq">${h(i.seq)}</td><td>${h(a.falha)||'<span class="pend">preencher</span>'}${a.corr?'<div class="small" style="color:var(--ok);font-weight:700">(X) Corrigido</div>':''}</td><td>${h(a.acao)}</td><td>${h(a.mat)}</td><td>${h(a.os)}</td>
  <td><button class="tick ${cp?'on':''}" ${ro?'disabled':''} data-act="cp" data-k="${i.key}" aria-label="Marcar como passado para a folha">${cp?'✓':''}</button></td></tr>`; }).join('')+`</tbody></table></div>`;
   html+=`<div class="row"><button class="btn y" data-act="copy">Copiar resumo em texto</button>${insp.fim||ro?'':`<button class="btn alt" data-act="wiz" data-id="${insp.id}">Continuar checklist</button>`}${ro?'':`<button class="btn" data-act="others" data-id="${insp.id}">Outros checklists do MHC80-${h(insp.mhc)}</button>`}</div>
+   <button class="btn danger full" data-act="${ro?'askDelR':'askDel'}" data-id="${h(insp.id)}">${ro?'Apagar este checklist da equipe':'Apagar este checklist'}</button>
    ${V.copyText?`<textarea class="copy" readonly id="copyTxt">${h(V.copyText)}</textarea>`:''}
   </div>`;
   return html;
@@ -659,6 +660,10 @@ function vBrowse(){
   return html+'</div>';
 }
 function vConfirm(){
+  if(V.confirmR){ const i=TEAM.insp||{};
+    return `<div class="modal" role="dialog" aria-modal="true"><div class="card stack"><h3>Apagar checklist da equipe?</h3>
+     <p style="margin:0">${h(i.by||'')} · MHC80-${h(i.mhc)} · ${h((CAT[i.cat]||{}).nome||'')} · ${fmt(i.inicio)}. Sai da sua lista de admin. Não dá para desfazer.</p>
+     <div class="row"><button class="btn danger" data-act="delR">Apagar</button><button class="btn ghost" data-act="noDel">Cancelar</button></div></div></div>`; }
   if(!V.confirm) return '';
   const i=S.insps[V.confirm];
   return `<div class="modal" role="dialog" aria-modal="true"><div class="card stack"><h3>Apagar inspeção?</h3>
@@ -796,8 +801,17 @@ document.addEventListener('click',e=>{
   }
   if(act==='imp'){ document.getElementById('impFile').click(); return; }
   if(act==='askDel'){ V.confirm=b.dataset.id; return render(); }
-  if(act==='noDel'){ V.confirm=null; return render(); }
-  if(act==='del'){ const id=V.confirm; delete S.insps[id]; V.confirm=null; saveLocal(); if(SENT[id]){ DEL.push(id); saveSent(); schedule(0); } toast('Inspeção apagada'); return render(); }
+  if(act==='noDel'){ V.confirm=null; V.confirmR=null; return render(); }
+  if(act==='del'){ const id=V.confirm, i=S.insps[id]; delete S.insps[id]; V.confirm=null; saveLocal(); if(SENT[id]){ DEL.push(id); saveSent(); schedule(0); } toast('Checklist apagado');
+    if(V.v==='sheet'||(V.v==='wiz'&&V.id===id)) return go(V.back||(i?{v:'cat',mhc:i.mhc,cat:i.cat}:{v:'home'}));
+    return render(); }
+  if(act==='askDelR'){ V.confirmR=true; return render(); }
+  if(act==='delR'){
+    const i=TEAM.insp, code=TEAM.code;
+    api('admin/ckdelete',{code,id:i.id}).then(()=>{ TEAM.list=(TEAM.list||[]).filter(x=>!(x.id===i.id&&x.code===code)); V.confirmR=null; toast('Checklist apagado'); go(V.back||{v:'browse',src:'team'}); })
+      .catch(e=>toast(e.status?e.message:'Sem internet. Tente de novo com sinal.'));
+    return;
+  }
   if(act==='team'){ go({v:'browse',src:'team'}); return loadTeam(); }
   if(act==='browse') return go({v:'browse',src:'own',fromMhc:V.v==='mhc'?V.mhc:null});
   if(act==='bP') return go(Object.assign({},V,{p:b.dataset.v}));

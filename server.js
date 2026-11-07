@@ -187,6 +187,13 @@ export async function onRequest(context) {
       out.sort((a, b) => (b.i || 0) - (a.i || 0));
       return json({ list: out });
     }
+    if (what === 'ckdelete' && method === 'POST') {
+      const body = await request.json().catch(() => ({}));
+      const id = String(body.id || '').replace(/[^a-z0-9]/gi, '');
+      if (!id) return fail('Checklist inválido.');
+      await env.DB.delete(`ck:${cleanCode(body.code) || 'ADMIN'}:${id}`);
+      return json({ ok: true });
+    }
     if (what === 'ck' && method === 'GET' && path.length === 4) {
       const i = await env.DB.get(`ck:${cleanCode(path[2]) || 'ADMIN'}:${path[3].replace(/[^a-z0-9]/gi, '')}`, { type: 'json' });
       if (!i) return fail('Checklist não encontrado.', 404);
