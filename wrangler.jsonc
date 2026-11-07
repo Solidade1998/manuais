@@ -2,6 +2,7 @@
   // Nome tem que ser IGUAL ao nome do Worker no Cloudflare
   "name": "manuais",
   "main": "worker.js",
+  "workers_dev": true,
   "compatibility_date": "2025-06-01",
   "assets": { "directory": "./", "binding": "ASSETS" },
   "kv_namespaces": [
