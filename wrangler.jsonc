@@ -1,0 +1,12 @@
+{
+  // Nome tem que ser IGUAL ao nome do Worker no Cloudflare
+  "name": "manuais",
+  "main": "worker.js",
+  "compatibility_date": "2025-06-01",
+  "assets": { "directory": "./", "binding": "ASSETS" },
+  "kv_namespaces": [
+    // Troque o texto abaixo pelo "ID" do KV manuais-db (Storage & Databases → KV)
+    { "binding": "DB", "id": "COLE_AQUI_O_ID_DO_KV" }
+  ],
+  "keep_vars": true
+}
