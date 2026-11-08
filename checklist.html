@@ -585,6 +585,40 @@ const MEC_RULES=[
   {re:/raspador.*piso|piso.*raspador/i, seqs:['18'], falha:()=>'Raspador da correia de piso danificado', acao:'Troca do raspador da correia de piso', pn:'241920'},
   {re:/cabo\s+de\s+a[cç]o.*i[cç]amento|i[cç]amento.*cabo/i, seqs:['13'], falha:()=>'Cabo de aço do içamento da correia danificado', acao:'Troca do cabo de aço', pn:'242483-040.00'}
 ];
+/* Anotações são sempre problemas. "ruim" pode vir ou não:
+   "Poste de retenção LD" = "Poste de retenção LD ruim". Se só tiver "ruim" (ou nada),
+   a falha fica "danificado/com defeito"; se tiver outra palavra (travado, avariado…), o "ruim" sai. */
+const COND_RE=/\b(travad\w*|avariad\w*|danificad\w*|quebrad\w*|gast[oa]s?|trincad\w*|solt[oa]s?|faltando|ausentes?|vazando|vazamentos?|baix[oa]s?|empenad\w*|rasgad\w*|furad\w*|queimad\w*|n[ãa]o\s+funciona\w*|sem\s+funcionar|defeito|desgast\w*|ressecad\w*|suj[oa]s?|ruidos[oa]|barulh\w*|sem\s+\w+)\b/i;
+const cap=s=>s?s[0].toUpperCase()+s.slice(1):s;
+function cleanTxt(s,fem){
+  let t=String(s).replace(/\s+/g,' ').replace(/[.;]+$/,'').trim();
+  const sem=t.replace(/\bruim\b/ig,'').replace(/\s+/g,' ').trim();
+  if(COND_RE.test(sem)) return cap(sem);
+  return cap(sem)+(fem?' danificada':' com defeito');
+}
+/* Roletes da correia de transferência: 4 de cada lado, contando de baixo (1) para cima (4).
+   Entram no item "Inspecionar correia de transferência" (seq 10, rota desligada, diário). */
+const ROLETE_SEQ='10';
+/* Outros problemas comuns → item da folha. A falha é o próprio texto anotado. */
+const FIX_RULES=[
+  {re:/arrefec|l[ií]quido\s+do\s+radiador|[áa]gua\s+do\s+radiador/i, cat:'mec', seq:'6', sug:'arref'},
+  {re:/hidr[áa]ul\w*.*(n[ií]vel|baix)|(n[ií]vel|baix).*hidr[áa]ul|tanque\s+hidr/i, cat:'hid', seq:'4', sug:'hidr'},
+  {re:/[óo]leo/i, cat:'mec', seq:'5', sug:'oleo', only:/n[ií]vel|baix|complet|falt/i},
+  {re:/filtro\s+de\s+ar/i, cat:'mec', seq:'8'},
+  {re:/vaza\w*.*motor|motor.*vaza/i, cat:'mec', seq:'7'},
+  {re:/correia\s+de\s+transfer/i, cat:'mec', seq:'10'},
+  {re:/(correia|corrente)\s+(de|do)\s+piso/i, cat:'mec', seq:'12'},
+  {re:/cilindro/i, cat:'hid', seq:'8'},
+  {re:/(mangueira|tubula\w*|vaza\w*).*hidr|hidr\w*.*(mangueira|vaza)/i, cat:'hid', seq:'5'},
+  {re:/(mangueira).*pneum|pneum\w*.*mangueira/i, cat:'pne', seq:'7'},
+  {re:/vaza\w*.*(\bar\b|pneum)|pneum\w*.*vaza/i, cat:'pne', seq:'5'},
+  {re:/ar\s+condicionado/i, cat:'ele', seq:'4', cond:'LIG'},
+  {re:/emerg[êe]ncia/i, cat:'ele', seq:'5', cond:'LIG'},
+  {re:/far[óo]is|farol|sinaliza/i, cat:'ele', seq:'7', cond:'LIG'},
+  {re:/\bluz\b|luzes|l[âa]mpada|ilumina/i, cat:'ele', seq:'6', cond:'LIG'},
+  {re:/bateria/i, cat:'ele', seq:'10', cond:'LIG'},
+  {re:/controle\s+a?\s*cabo/i, cat:'ele', seq:'9', cond:'LIG'}
+];
 function pieces(t){
   const out=[]; [[t.texto,t.by],...(t.comments||[]).map(c=>[c.texto,c.by])].forEach(([tx,by])=>
     String(tx||'').split(/\n+/).forEach(l=>l.split(/[;,](?!\s*(?:[1-4]\b|l\.?\s?[ed]\b|lado))/i).map(x=>x.trim()).filter(Boolean).forEach(x=>out.push({txt:x,by}))));
@@ -594,18 +628,26 @@ function pieces(t){
 function findings(t){
   const ps=pieces(t), found=[], rest=[];
   const shoe={'4':{LE:new Set(),LD:new Set()},'5':{LE:new Set(),LD:new Set()}}, poste=new Set(); let posteHit=false;
+  const rol=[]; let rolN=0;
   ps.forEach(pc=>{
     let hit=false;
     for(const m of pc.txt.matchAll(EIXO_RE)){ const sides=sidesIn(m[2]);
       (m[1].match(/[1-4]/g)||[]).forEach(e=>sides.forEach(sd=>shoe[+e<=2?'4':'5'][sd].add(+e))); hit=true; }
     if(hit) return;
+    if(/rolete/i.test(pc.txt)){ const nums=(pc.txt.replace(/rolete[s]?/ig,' ').match(/\b[1-4]\b/g)||[]), sides=Math.max(1,sidesIn(pc.txt).length);
+      rolN+=Math.max(1,nums.length)*sides; rol.push(cleanTxt(pc.txt,false).replace(/ com defeito$/,' danificado')); return; }
     const r=MEC_RULES.find(x=>x.re.test(pc.txt));
     if(r){ if(r.porLado){ posteHit=true; sidesIn(pc.txt).forEach(x=>poste.add(x)); return; }
       r.seqs.forEach(sq=>found.push({cat:'mec',cond:DES,seq:sq,falha:r.falha(''),acao:r.acao,mat:partTxt(r.pn),by:pc.by})); return; }
     const m=pc.txt.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
     if(m){ found.push({cat:null,seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),falha:m[3].trim(),by:pc.by}); return; }
+    const fx=FIX_RULES.find(x=>x.re.test(pc.txt)&&(!x.only||x.only.test(pc.txt)));
+    if(fx){ const s=fx.sug&&SUG[fx.sug]&&SUG[fx.sug][0];
+      found.push({cat:fx.cat,cond:fx.cond==='LIG'?LIG:DES,seq:fx.seq,falha:s?s.f:cleanTxt(pc.txt,false),acao:s?s.a:'',mat:s?s.m:'',by:pc.by}); return; }
     rest.push(pc);
   });
+  if(rol.length) found.push({cat:'mec',cond:DES,seq:ROLETE_SEQ,falha:rol.join('; '),acao:rolN>1?'Troca dos roletes da correia de transferência':'Troca do rolete da correia de transferência',
+    mat:`241313 - Rolete da correia de transferência (${rolN} un)`});
   for(const k of ['4','5']){ const parts=[]; let n=0;
     for(const sd of ['LE','LD']){ const ex=[...shoe[k][sd]].sort(); if(!ex.length) continue; n+=ex.length;
       parts.push(`eixo ${ex.length>1?ex.slice(0,-1).join(', ')+' e '+ex.at(-1):ex[0]} ${sd}`); }
@@ -755,6 +797,15 @@ function cardInsp(i){
   </div>`;
 }
 
+/* Só aparece depois que você começou a anotar: pergunta se quer passar para o checklist */
+function noteAct(m){
+  if(!noteGet(m).trim()) return '';
+  return `<div class="stack" style="gap:8px;border-top:1px solid var(--line,#444);padding-top:10px">
+    <b>Terminou de anotar? Passar as anotações para o checklist do MHC ${h(m)}</b>
+    <span class="small muted">Os problemas viram <b>Não Ok</b> com falha, ação e material, e o resto fica <b>Ok</b>. Você confere e finaliza cada sistema.</span>
+    <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="qfEsc" data-v="${k}" class="${(V.qfEsc||'D')===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
+    <button class="btn y full" data-act="qfAsk">Sim, passar para o checklist ${ESC[V.qfEsc||'D'].toLowerCase()}</button></div>`;
+}
 function vQuickResult(r){
   return `<section class="card stack" style="gap:8px;border-left:6px solid var(--ok)">
     <b>Preenchido pelas anotações</b>
@@ -778,23 +829,20 @@ function vMhc(){
     return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}${quick?`<span class="small" style="font-weight:700">Toque para começar agora ›</span>`:''}</button>`;
   }).join('');
   const minha=noteGet(m).trim(), nOpen=V.noteOpen===undefined?!!minha:V.noteOpen;
-  const fora=frota().fora.includes(m), ntips=notesFor(m).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today)).length+(minha?1:0);
+  const fora=frota().fora.includes(m);
   const notaBox=`<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
       <button class="row" style="border:0;background:none;padding:0;justify-content:space-between;width:100%;font-weight:700;color:inherit;font-size:17px" data-act="noteToggle" aria-expanded="${nOpen}">
         <span>📝 Anotações para o checklist${minha&&!nOpen?' <span class="pill p-open">escrita</span>':''}</span><span>${nOpen?'▲':'▼'}</span></button>
-      ${nOpen?`<div class="fld"><label for="nt">O que está avariado no MHC ${h(m)}</label>
-        <textarea id="nt" data-note="${h(m)}" style="min-height:130px" placeholder="ex.: poste de retenção LE, sapata eixo 2 LD, eixo 3 LE e LD, raspador da correia de piso">${h(noteGet(m))}</textarea></div>
-        <span class="small muted">Separe por vírgula ou linha. Fica salvo no celular enquanto você escreve. Quando terminar, toque em <b>Preencher pelas anotações</b> logo abaixo.</span>
-        <section class="card stack" style="gap:8px" id="notePrev">${notePreview(m)}</section>`:`<span class="small muted">${minha?h(minha.length>90?minha.slice(0,90)+'…':minha):'Toque para anotar o que está avariado. No final tudo passa para o checklist.'}</span>`}
+      ${nOpen?`<div class="fld"><label for="nt">Problemas encontrados no MHC ${h(m)}</label>
+        <textarea id="nt" data-note="${h(m)}" style="min-height:140px" placeholder="ex.:\nPoste de retenção LD ruim\nSapata eixo 3 LD e LE\nRolete 1 LD travado, rolete 4 LD avariado\nFluido de arrefecimento baixo">${h(noteGet(m))}</textarea></div>
+        <span class="small muted">Um problema por linha ou separados por vírgula. Pode escrever "ruim" ou não. Roletes: 1 é o de baixo, 4 o de cima. Fica salvo no celular enquanto você escreve.</span>
+        <section class="card stack" style="gap:8px" id="notePrev">${notePreview(m)}</section>`:`<span class="small muted">${minha?h(minha.length>90?minha.slice(0,90)+'…':minha):'Toque para anotar os problemas encontrados. No final eu pergunto se você quer passar tudo para o checklist.'}</span>`}
+      <div id="noteAct">${V.qf?'':noteAct(m)}</div>
     </section>`;
   return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
     ${fora?`<div class="card small" style="border-left:6px solid var(--warn)"><b>Este MHC está fora da frota de hoje.</b> Dá para fazer o checklist mesmo assim.</div>`:''}
     ${notaBox}
-    ${V.qf?vQuickResult(V.qf):`<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
-      <b>⚡ Preencher pelas anotações</b>
-      <span class="small muted">Marca Ok em tudo e aplica os Não Ok das anotações de hoje deste MHC (${ntips} anotaç${ntips===1?'ão':'ões'})${frota().rasp.includes(m)?'':', mais o raspador da correia de transferência'}. Você confere e finaliza cada sistema.</span>
-      <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="qfEsc" data-v="${k}" class="${(V.qfEsc||'D')===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
-      <button class="btn y full" data-act="qfAsk">Preencher ${ESC[V.qfEsc||'D'].toLowerCase()} pelas anotações</button></section>`}
+    ${V.qf?vQuickResult(V.qf):''}
     ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
     ${cards}
     <button class="btn ghost full" data-act="browse">Histórico por data</button></div>`;
@@ -1251,7 +1299,7 @@ document.addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.id==='mh
 let noteT;
 document.addEventListener('input',e=>{
   const t=e.target;
-  if(t.dataset.note){ noteSet(t.dataset.note,t.value); clearTimeout(noteT); noteT=setTimeout(()=>{ const el=document.getElementById('notePrev'); if(el) el.innerHTML=notePreview(t.dataset.note); },400); return; }
+  if(t.dataset.note){ noteSet(t.dataset.note,t.value); clearTimeout(noteT); noteT=setTimeout(()=>{ const el=document.getElementById('notePrev'); if(el) el.innerHTML=notePreview(t.dataset.note); const ac=document.getElementById('noteAct'); if(ac&&!V.qf) ac.innerHTML=noteAct(t.dataset.note); },400); return; }
   if(t.dataset.f && V.v==='wiz'){
     const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key]; if(!a) return;
     a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; touch(insp); return;
