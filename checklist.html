@@ -469,6 +469,70 @@ function autoPart(insp,it,a){
   if(!(a.acao||'').trim()) a.acao='Trocar '+PART[auto].nome.toLowerCase();
 }
 
+/* ===================== MESMO ITEM NAS DUAS ROTAS =====================
+   Não Ok num item da rota desligada vale também para o mesmo componente na rota ligada
+   (e vice-versa). Pares por seq: [desligada, ligada]. */
+const ROUTE_PAIRS={
+  mec:[['1','1'],['2','2'],['12','3'],['10','4'],['16','6'],['19','7'],['21','8'],['22','9'],['23','10'],['18','11']],
+  pne:[['1','1'],['2','2'],['3','3'],['7','6'],['5','7']]
+};
+function twinOf(insp,it){
+  const pr=(ROUTE_PAIRS[insp.cat]||[]).find(p=>it.cond===DES?p[0]===it.seq:p[1]===it.seq); if(!pr) return null;
+  const want=it.cond===DES?LIG:DES, sq=it.cond===DES?pr[1]:pr[0];
+  return scoped(insp).find(i=>i.cond===want&&i.seq===sq)||null;
+}
+/* marca Não Ok somando falha/ação/material sem repetir; espelha na outra rota */
+function setNok(insp,it,f,noMirror){
+  const a=insp.ans[it.key]||{}; a.r='nok'; a.t=Date.now();
+  if(f.falha){ const tx=f.falha.trim(); a.falha=(a.falha||'').trim()&&!a.falha.includes(tx)?a.falha+' / '+tx:(a.falha||tx); }
+  if(f.mat){ const pn=f.mat.split(' - ')[0]; const keep=(a.mat||'').split(' / ').filter(p=>p.trim()&&!p.includes(pn)); a.mat=[...keep,f.mat].join(' / '); }
+  if(f.acao&&(!(a.acao||'').trim()||/^Trocar /.test(a.acao))) a.acao=f.acao;
+  if(!f.mat&&!f.mirrorOf) autoPart(insp,it,a);
+  insp.ans[it.key]=a;
+  if(!noMirror){ const tw=twinOf(insp,it);
+    if(tw&&(insp.ans[tw.key]||{}).r!=='nok') setNok(insp,tw,{falha:`Mesma falha do seq ${it.seq} (rota ${it.cond===DES?'desligada':'ligada'})`,mirrorOf:it.key},true); }
+  return a;
+}
+
+/* ===================== FROTA DO DIA =====================
+   17 MHCs. Os que estão fora (outra responsabilidade, avariado, fora do comboio)
+   saem da lista do dia; o checklist deles fica para outro dia. "Raspador novo" diz em
+   quais o raspador da correia de transferência já foi trocado (nos outros é Não Ok). */
+const FROTA=Array.from({length:17},(_,i)=>p2(i+1));
+function frota(){ const f=S.prof.frota||{}; return {fora:f.fora||['03','06','10','16'], rasp:f.rasp||['01','15']}; }
+function setFrota(k,m){ const f=frota(); f[k]=f[k].includes(m)?f[k].filter(x=>x!==m):[...f[k],m].sort(); S.prof.frota=f; touchProf(); }
+
+/* ===================== PREENCHER PELAS ANOTAÇÕES =====================
+   Para um MHC: cria (ou completa) o checklist de cada sistema, marca Ok em tudo que
+   está sem resposta e aplica os Não Ok das anotações de hoje desse MHC, do raspador
+   de transferência (se não for novo) e o espelho entre as rotas. Nada é finalizado:
+   você confere e finaliza. */
+function quickFill(mhc,escopo){
+  const today=dayKey(Date.now()), cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const tips=notesFor(mhc).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today));
+  const tpl=Object.values(S.insps).sort((a,b)=>(b.upd||0)-(a.upd||0))[0]||{};
+  const report=[]; const loose=[];
+  for(const c of cats){
+    let insp=inspsFor(mhc,c.id).find(i=>!i.fim&&dayKey(i.inicio)===today);
+    if(!insp){ const id=newId(); const esc=(c.esc||['D','S','M']).includes(escopo)?escopo:(c.esc||['D'])[0];
+      insp={id,mhc,cat:c.id,escopo:esc,rota:'des',oficina:S.prof.oficina||tpl.oficina||'',patio:S.prof.patio||tpl.patio||'',
+        mant:JSON.parse(JSON.stringify(S.prof.mant||[])),inicio:Date.now(),fim:0,ans:{},cp:{},auto:true};
+      S.insps[id]=insp; }
+    const items=scoped(insp), noks=[];
+    const nok=(it,f)=>{ setNok(insp,it,f); noks.push(it.seq); };
+    tips.forEach(t=>{ const {found,rest}=findings(t);
+      found.forEach(f=>{ if(f.cat&&f.cat!==c.id) return; if(!f.cat) return; // número solto: aplicar na mão
+        const k=suggestKey(items,f.seq,f.cond); const it=items.find(i=>i.key===k); if(it) nok(it,f); });
+      if(c.id===cats[0].id){ rest.forEach(r=>loose.push(r.txt)); found.filter(f=>!f.cat).forEach(f=>loose.push(`${f.seq} - ${f.falha}`)); } });
+    if(c.id==='mec'&&!frota().rasp.includes(mhc)){ const r=MEC_RULES[1]; const it=items.find(i=>i.cond===DES&&i.seq==='21');
+      if(it) nok(it,{falha:r.falha(),acao:r.acao,mat:partTxt(r.pn)}); }
+    items.forEach(it=>{ const a=insp.ans[it.key]||{}; if(!a.r){ a.r='ok'; a.t=Date.now(); insp.ans[it.key]=a; } });
+    touch(insp);
+    report.push({id:insp.id,cat:c.id,noks:scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok').map(i=>i.seq+(i.cond===LIG?' (lig.)':''))});
+  }
+  return {report,loose,tips:tips.length};
+}
+
 /* ===================== ANOTAÇÕES DA ABA DICAS NO CHECKLIST =====================
    Dicas cujo título/máquina citam o MHC (ex.: "MHC12", "MHC80-12", "Mhc 14") aparecem
    no checklist daquele MHC. Cada linha ou comentário vira um trecho que pode ser
@@ -490,56 +554,66 @@ function tipMhc(t){
   return null;
 }
 const notesFor=mhc=>NOTES.filter(t=>tipMhc(t)===+mhc);
-/* Sapatas de freio do Truque: "eixo 3 LE", "eixo 3 e 4 LE", "eixos 1, 2 LD".
-   Eixo 1 é o primeiro embaixo da cabine do motor; 1 e 2 = truque dianteiro (seq 4),
-   3 e 4 = truque traseiro (seq 5). Vira um trecho por seq, com falha, ação e material. */
-const EIXO_RE=/eixos?\s*((?:[1-4]\s*(?:,|e|\/|\+)?\s*)+)\s*(l\.?\s?e\b|l\.?\s?d\b|lado\s+esquerdo|lado\s+direito|esquerdo|direito)/gi;
-function shoeSegments(lines){
-  const by={'4':{LE:new Set(),LD:new Set()},'5':{LE:new Set(),LD:new Set()}}, used=new Set(), extra={'4':[],'5':[]};
-  lines.forEach((l,ix)=>{ let hit=false; const keys=new Set();
-    for(const m of l.txt.matchAll(EIXO_RE)){ const sd=m[2].replace(/[\s.]/g,'').toLowerCase(), side=(/direito/.test(sd)||sd==='ld')?'LD':'LE';
-      (m[1].match(/[1-4]/g)||[]).forEach(e=>{ const k=+e<=2?'4':'5'; by[k][side].add(+e); keys.add(k); hit=true; }); }
-    if(hit){ used.add(ix);
-      const rest=l.txt.replace(EIXO_RE,' ').replace(/\b(sapatas?|de|do|da|freio|e|ruim|ruins)\b/gi,' ').replace(/[\s,.;:-]+/g,' ').trim();
-      if(rest.length>3) keys.forEach(k=>extra[k].push(l.txt)); }
-  });
-  const out=[];
-  for(const k of ['4','5']){ const parts=[]; let n=0;
-    for(const side of ['LE','LD']){ const ex=[...by[k][side]].sort(); if(!ex.length) continue; n+=ex.length;
-      parts.push(`eixo ${ex.length>1?ex.slice(0,-1).join(', ')+' e '+ex.at(-1):ex[0]} ${side}`); }
-    if(!n) continue;
-    const pl=n>1;
-    let txt=`${pl?'Sapatas':'Sapata'} ${parts.join(' e ')} ${pl?'danificadas':'danificada'}`;
-    if(extra[k].length) txt+=` (${[...new Set(extra[k])].join('; ')})`;
-    out.push({seq:k,txt,by:'',acao:pl?'Troca das sapatas de freio':'Troca da sapata de freio',mat:`A15741 - Sapata de freio (${n} un)`,shoe:true});
-  }
-  return {out,used};
-}
-function segments(t,cat){
-  const out=[];
-  // no Truque, junta todas as menções de eixo/lado da dica (texto e comentários)
-  if(cat==='tru'){
-    const lines=[]; [[t.texto,t.by],...(t.comments||[]).map(c=>[c.texto,c.by])].forEach(([tx,by])=>String(tx||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).forEach(l=>lines.push({txt:l,by})));
-    const r=shoeSegments(lines);
-    if(r.out.length){ out.push(...r.out);
-      const rest=lines.filter((_,i)=>!r.used.has(i));
-      const loose=[]; rest.forEach(l=>{ const m=l.txt.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
-        if(m) out.push({seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),txt:m[3].trim(),by:l.by}); else loose.push(l.txt); });
-      if(loose.length) out.push({seq:'',txt:loose.join(' '),by:''});
-      return out;
-    }
-  }
-  const push=(txt,by)=>{ const loose=[];
-    String(txt||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).forEach(l=>{
-      const m=l.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
-      if(m) out.push({seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),txt:m[3].trim(),by}); else loose.push(l); });
-    if(loose.length) out.push({seq:'',txt:loose.join(' '),by}); };
-  push(t.texto,t.by); (t.comments||[]).forEach(c=>push(c.texto,c.by));
-  if(!out.length&&t.titulo) out.push({seq:'',txt:t.titulo,by:t.by});
+/* ---------- Leitura das anotações ----------
+   Cada linha é quebrada em pedaços por vírgula/ponto e vírgula. Reconhece:
+   - sapatas: "eixo 3 LE", "eixo 3 LE e LD", "eixos 1, 2 LD" (eixo 1 = embaixo da cabine;
+     1 e 2 = truque dianteiro, seq 4; 3 e 4 = traseiro, seq 5) — junta tudo da dica;
+   - "poste de retenção LE/LD" → Mecânico 11 e 17; "raspador … transferência" → 21;
+     "raspador … piso" → 18; "cabo de aço … içamento" → 13 (rota desligada; a ligada
+     recebe o mesmo Não Ok pelos pares de rota);
+   - "5 - texto", "seq 13 TF: texto" → item pelo número;
+   - o resto fica para escolher o item na mão. */
+const SIDE_RE='(?:l\\.?\\s?e|l\\.?\\s?d|lado\\s+esquerdo|lado\\s+direito|esquerdo|direito)\\b';
+const EIXO_RE=new RegExp('eixos?\\s*((?:[1-4]\\s*(?:,|e|\\/|\\+)?\\s*)+)\\s*((?:'+SIDE_RE+'\\s*(?:,|e|\\/|\\+)?\\s*)+)','gi');
+const sideOf=t=>{ const sd=t.replace(/[\s.]/g,'').toLowerCase(); return (/direito/.test(sd)||sd==='ld')?'LD':'LE'; };
+const sidesIn=t=>[...new Set((t.match(new RegExp(SIDE_RE,'gi'))||[]).map(sideOf))];
+const MEC_RULES=[
+  {re:/poste\s+de\s+reten/i, seqs:['11','17'], nome:'Poste de retenção', falha:s=>`Poste de retenção danificado ${s}`.trim(), acao:'Troca do cabo de aço', pn:'242483-040.00', porLado:true},
+  {re:/raspador.*transf|transf.*raspador/i, seqs:['21'], falha:()=>'Raspador da correia de transferência danificado', acao:'Troca do raspador da correia de transferência', pn:'241338'},
+  {re:/raspador.*piso|piso.*raspador/i, seqs:['18'], falha:()=>'Raspador da correia de piso danificado', acao:'Troca do raspador da correia de piso', pn:'241920'},
+  {re:/cabo\s+de\s+a[cç]o.*i[cç]amento|i[cç]amento.*cabo/i, seqs:['13'], falha:()=>'Cabo de aço do içamento da correia danificado', acao:'Troca do cabo de aço', pn:'242483-040.00'}
+];
+function pieces(t){
+  const out=[]; [[t.texto,t.by],...(t.comments||[]).map(c=>[c.texto,c.by])].forEach(([tx,by])=>
+    String(tx||'').split(/\n+/).forEach(l=>l.split(/[;,](?!\s*(?:[1-4]\b|l\.?\s?[ed]\b|lado))/i).map(x=>x.trim()).filter(Boolean).forEach(x=>out.push({txt:x,by}))));
   return out;
 }
-function suggestKey(items,seq){
+/* achados de uma dica: [{cat, cond, seq, falha, acao, mat, by}] + pedaços sem regra */
+function findings(t){
+  const ps=pieces(t), found=[], rest=[];
+  const shoe={'4':{LE:new Set(),LD:new Set()},'5':{LE:new Set(),LD:new Set()}}, poste=new Set(); let posteHit=false;
+  ps.forEach(pc=>{
+    let hit=false;
+    for(const m of pc.txt.matchAll(EIXO_RE)){ const sides=sidesIn(m[2]);
+      (m[1].match(/[1-4]/g)||[]).forEach(e=>sides.forEach(sd=>shoe[+e<=2?'4':'5'][sd].add(+e))); hit=true; }
+    if(hit) return;
+    const r=MEC_RULES.find(x=>x.re.test(pc.txt));
+    if(r){ if(r.porLado){ posteHit=true; sidesIn(pc.txt).forEach(x=>poste.add(x)); return; }
+      r.seqs.forEach(sq=>found.push({cat:'mec',cond:DES,seq:sq,falha:r.falha(''),acao:r.acao,mat:partTxt(r.pn),by:pc.by})); return; }
+    const m=pc.txt.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
+    if(m){ found.push({cat:null,seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),falha:m[3].trim(),by:pc.by}); return; }
+    rest.push(pc);
+  });
+  for(const k of ['4','5']){ const parts=[]; let n=0;
+    for(const sd of ['LE','LD']){ const ex=[...shoe[k][sd]].sort(); if(!ex.length) continue; n+=ex.length;
+      parts.push(`eixo ${ex.length>1?ex.slice(0,-1).join(', ')+' e '+ex.at(-1):ex[0]} ${sd}`); }
+    if(n) found.push({cat:'tru',cond:DES,seq:k,falha:`${n>1?'Sapatas':'Sapata'} ${parts.join(' e ')} ${n>1?'danificadas':'danificada'}`,
+      acao:n>1?'Troca das sapatas de freio':'Troca da sapata de freio',mat:`A15741 - Sapata de freio (${n} un)`});
+  }
+  if(posteHit){ const sd=[...poste].sort().join(' e '), r=MEC_RULES[0], q=Math.max(1,poste.size)*2;
+    r.seqs.forEach(sq=>found.push({cat:'mec',cond:DES,seq:sq,falha:r.falha(sd),acao:r.acao,mat:`242483-040.00 - Cabo de aço MHC (${q} un)`})); }
+  return {found,rest};
+}
+/* trechos para o modal Aplicar, no sistema da inspeção aberta */
+function segments(t,cat){
+  const {found,rest}=findings(t);
+  const out=found.filter(f=>!f.cat||f.cat===cat).map(f=>({seq:f.seq,cond:f.cond,txt:f.falha,acao:f.acao,mat:f.mat,shoe:!!f.mat,by:f.by||''}));
+  if(rest.length) out.push({seq:'',txt:rest.map(r=>r.txt).join(' · '),by:''});
+  return out;
+}
+function suggestKey(items,seq,cond){
   if(!seq) return '';
+  if(cond){ const k=items.find(i=>i.cond===cond&&i.seq.toUpperCase()===seq.toUpperCase()); if(k) return k.key; }
   const exact=items.filter(i=>i.seq.toUpperCase()===seq.toUpperCase());
   const pool=exact.length?exact:items.filter(i=>i.seq.split(' ')[0]===seq.split(' ')[0]);
   const lig=pool.find(i=>i.cond===LIG); // as anotações foram da rota ligada
@@ -565,7 +639,7 @@ function vApply(){
   return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="apT"><div class="card stack" style="max-height:88vh;overflow:auto">
     <h3 id="apT">Aplicar no checklist</h3>
     <p class="small muted" style="margin:0">Escolha o item de cada trecho. Ele fica <b>Não Ok</b> e o texto vai como falha no registro de tráfego.</p>
-    ${sg.map((x,ix)=>{ const sug=suggestKey(items,x.seq); const ok=done.includes(ix);
+    ${sg.map((x,ix)=>{ const sug=suggestKey(items,x.seq,x.cond); const ok=done.includes(ix);
       return `<div class="cm" style="gap:8px"><div>${x.seq?`<b>Seq ${h(x.seq)}:</b> `:''}${h(x.txt)}${x.by?` <span class="small muted">· ${h(x.by)}</span>`:''}</div>
         ${x.shoe?`<div class="small muted">Ação: <b>${h(x.acao)}</b> · Material: <b>${h(x.mat)}</b></div>`:''}
         <select id="ap${ix}" class="search" style="padding:10px">${sug?'':'<option value="">Escolha o item…</option>'}${items.map(i=>`<option value="${i.key}" ${i.key===sug?'selected':''}>Seq ${h(i.seq)} · ${h(i.cond===LIG?'ligado':'deslig.')} · ${h(i.atv.slice(0,60))}</option>`).join('')}</select>
@@ -578,6 +652,24 @@ function topBar(title, back){
   return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:''}<div class="ttl">${title}</div><span id="sync" class="sync">${syncText()}</span></header>`;
 }
 
+function vFrota(){
+  const f=frota(), today=dayKey(Date.now()), ed=!!V.frotaEdit, cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const ativos=FROTA.filter(m=>!f.fora.includes(m));
+  const chip=m=>{ const fora=f.fora.includes(m);
+    if(ed) return `<button class="chip ${fora?'':'on'}" data-act="frotaTog" data-m="${m}" aria-pressed="${!fora}">${m}</button>`;
+    if(fora) return `<span class="chip" style="border-style:dashed;opacity:.5">${m} · fora</span>`;
+    const feitos=cats.filter(c=>inspsFor(m,c.id).some(i=>dayKey(i.inicio)===today&&i.fim)).length;
+    const and=cats.some(c=>inspsFor(m,c.id).some(i=>dayKey(i.inicio)===today&&!i.fim));
+    return `<button class="chip ${feitos===cats.length?'on':''}" data-act="openMhc" data-m="${m}">${m}${feitos?` · ${feitos}/${cats.length}`:and?' · …':''}</button>`; };
+  return `<section class="card stack" style="gap:10px">
+    <div class="row" style="justify-content:space-between"><b>Frota de hoje · ${ativos.length} de ${FROTA.length} MHC</b>
+      <button class="btn ${ed?'y':'ghost'}" style="min-height:36px;padding:4px 12px" data-act="frotaEdit">${ed?'Pronto':'Editar frota'}</button></div>
+    ${ed?`<span class="small muted">Toque para tirar ou pôr de volta no dia. Os desmarcados ficam para outro dia.</span>`:`<span class="small muted">Toque no MHC para abrir. O número mostra quantos sistemas já foram finalizados hoje.</span>`}
+    <div class="chips">${FROTA.map(chip).join('')}</div>
+    ${ed?`<b class="small">Raspador da correia de transferência novo</b><span class="small muted">Nos marcados ele não entra como Não Ok automático.</span>
+      <div class="chips">${FROTA.map(m=>`<button class="chip ${f.rasp.includes(m)?'on':''}" data-act="raspTog" data-m="${m}">${m}</button>`).join('')}</div>`:''}
+  </section>`;
+}
 function vHome(){
   const recent=mhcList();
   const abertas=Object.values(S.insps).filter(i=>!i.fim).sort((a,b)=>(b.upd||0)-(a.upd||0));
@@ -585,8 +677,8 @@ function vHome(){
   <section class="ask">
     <label for="mhcIn">Qual MHC você está?</label>
     <div class="mhcin"><span>MHC80-</span><input id="mhcIn" inputmode="numeric" maxlength="3" autocomplete="off"><button data-act="goMhc">Abrir</button></div>
-    ${recent.length?`<div class="stack" style="margin-top:14px;gap:6px"><span class="small muted">Já inspecionados</span><div class="chips">${recent.map(m=>`<button class="chip" data-act="openMhc" data-m="${h(m)}">MHC80-${h(m)}</button>`).join('')}</div></div>`:''}
   </section>
+  ${vFrota()}
   ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
   ${Object.keys(S.insps).length?`<button class="btn alt full" data-act="browse">Meus checklists por data</button>`:''}
   ${AUTH.admin?`<button class="btn full" data-act="team">Checklists da equipe (admin)</button>`:''}
@@ -609,6 +701,14 @@ function cardInsp(i){
   </div>`;
 }
 
+function vQuickResult(r){
+  return `<section class="card stack" style="gap:8px;border-left:6px solid var(--ok)">
+    <b>Preenchido pelas anotações</b>
+    ${r.report.map(x=>`<button class="catcard" data-act="sheetQ" data-id="${x.id}"><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${h(CAT[x.cat].nome)}</span>${x.noks.length?`<span class="pill p-nok">${x.noks.length} Não Ok</span>`:'<span class="pill p-ok">Tudo Ok</span>'}</div>
+      ${x.noks.length?`<span class="small muted">Seq ${x.noks.map(h).join(', ')}</span>`:''}<span class="small" style="font-weight:700">Conferir a folha ›</span></button>`).join('')}
+    ${r.loose.length?`<div class="small" style="color:var(--warn)"><b>Não reconheci, aplique na mão:</b> ${r.loose.map(h).join(' · ')}</div>`:''}
+    <button class="btn ghost full" data-act="qfClose">Fechar</button></section>`;
+}
 function vMhc(){
   const m=V.mhc, today=dayKey(Date.now()), tpl=V.from&&S.insps[V.from];
   const cards=CATS.filter(c=>allowed(c.id)).map(c=>{
@@ -623,7 +723,14 @@ function vMhc(){
     const act=andamento&&tpl?`data-act="wiz" data-id="${andamento.id}"`:quick?`data-act="quick" data-c="${c.id}"`:`data-act="openCat" data-c="${c.id}"`;
     return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}${quick?`<span class="small" style="font-weight:700">Toque para começar agora ›</span>`:''}</button>`;
   }).join('');
+  const fora=frota().fora.includes(m), ntips=notesFor(m).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today)).length;
   return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
+    ${fora?`<div class="card small" style="border-left:6px solid var(--warn)"><b>Este MHC está fora da frota de hoje.</b> Dá para fazer o checklist mesmo assim.</div>`:''}
+    ${V.qf?vQuickResult(V.qf):`<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
+      <b>⚡ Preencher pelas anotações</b>
+      <span class="small muted">Marca Ok em tudo e aplica os Não Ok das anotações de hoje deste MHC (${ntips} anotaç${ntips===1?'ão':'ões'})${frota().rasp.includes(m)?'':', mais o raspador da correia de transferência'}. Você confere e finaliza cada sistema.</span>
+      <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="qfEsc" data-v="${k}" class="${(V.qfEsc||'D')===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
+      <button class="btn y full" data-act="qfAsk">Preencher ${ESC[V.qfEsc||'D'].toLowerCase()} pelas anotações</button></section>`}
     ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
     ${cards}
     <button class="btn ghost full" data-act="browse">Histórico por data</button></div>`;
@@ -844,6 +951,12 @@ function vBrowse(){
       <span class="small muted">${ESC[x.e]||''} · início ${fmtH(x.i)}${x.f?' · fim '+fmtH(x.f):' · em andamento'}${x.falta?' · registro pendente':''}</span></button>`; });
   return html+'</div>';
 }
+function vQfAsk(){
+  if(V.v!=='mhc'||!V.qfAsk) return '';
+  return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="qfT"><div class="card stack"><h3 id="qfT">Preencher o MHC80-${h(V.mhc)}?</h3>
+    <p style="margin:0">Escopo <b>${ESC[V.qfEsc||'D']}</b>. Tudo que estiver sem resposta vira <b>Ok</b>, e os problemas das anotações de hoje viram <b>Não Ok</b> com falha, ação e part number. Respostas que você já deu não mudam.</p>
+    <button class="btn y full" data-act="qfGo">Sim, preencher</button><button class="btn ghost full" data-act="qfNo">Cancelar</button></div></div>`;
+}
 function vEditAsk(){
   if(V.v!=='sheet'||V.editAsk==null) return '';
   const insp=curInsp(); const it=insp&&scoped(insp)[V.editAsk]; if(!it) return '';
@@ -895,8 +1008,8 @@ function render(){
     case 'browse': html=vBrowse(); break;
     default: html=vHome();
   }
-  $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply();
-  if(V.v==='wiz'||(V.v==='sheet'&&!V.ro)) loadNotes();
+  $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
+  if(V.v==='wiz'||V.v==='mhc'||(V.v==='sheet'&&!V.ro)) loadNotes();
 }
 function softRender(){
   const ae=document.activeElement;
@@ -972,7 +1085,7 @@ document.addEventListener('click',e=>{
     const insp=curInsp(), it=scoped(insp)[V.pos], r=b.dataset.r;
     const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; touch(insp);
     if(V.editOne){ insp.editado=Date.now(); touch(insp); }
-    if(r==='nok'){ autoPart(insp,it,a); touch(insp); V.ask=it.key; render(); return; }
+    if(r==='nok'){ setNok(insp,it,{}); touch(insp); V.ask=it.key; render(); return; }
     if(V.editOne){ toast('Resposta corrigida'); return go(V.retSheet); }
     V.pos++; render(); window.scrollTo(0,0);
     return;
@@ -985,6 +1098,15 @@ document.addEventListener('click',e=>{
     return;
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='frotaEdit'){ V.frotaEdit=!V.frotaEdit; return render(); }
+  if(act==='frotaTog'){ setFrota('fora',b.dataset.m); return render(); }
+  if(act==='raspTog'){ setFrota('rasp',b.dataset.m); return render(); }
+  if(act==='qfEsc'){ V.qfEsc=b.dataset.v; return render(); }
+  if(act==='qfAsk'){ V.qfAsk=true; return render(); }
+  if(act==='qfNo'){ V.qfAsk=false; return render(); }
+  if(act==='qfGo'){ V.qfAsk=false; V.qf=quickFill(V.mhc,V.qfEsc||'D'); toast('Checklists preenchidos'); return render(); }
+  if(act==='qfClose'){ V.qf=null; return render(); }
+  if(act==='sheetQ') return go({v:'sheet',id:b.dataset.id,back:{v:'mhc',mhc:V.mhc,qf:V.qf,qfEsc:V.qfEsc}});
   if(act==='allParts'){ V.allParts=V.allParts===b.dataset.k?null:b.dataset.k; const y=window.scrollY; render(); window.scrollTo(0,y); return; }
   if(act==='addPart'){
     const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
@@ -1001,15 +1123,8 @@ document.addEventListener('click',e=>{
     const insp=curInsp(), t=NOTES.find(x=>x.id===V.apply), ix=+b.dataset.i, x=segments(t,insp.cat)[ix];
     const key=(document.getElementById('ap'+ix)||{}).value;
     if(!key){ toast('Escolha o item primeiro'); return; }
-    const it=scoped(insp).find(i=>i.key===key), a=insp.ans[key]||{};
-    const txt=x.txt.trim();
-    a.r='nok'; a.t=Date.now();
-    if(x.mat){ // sapatas: material com a quantidade certa, no lugar do (1 un) automático
-      const keep=(a.mat||'').split(' / ').filter(p=>p.trim()&&!p.includes(x.mat.split(' - ')[0]));
-      a.mat=[...keep,x.mat].join(' / '); if(!(a.acao||'').trim()||/^Trocar sapata de freio$/i.test(a.acao)) a.acao=x.acao; }
-    autoPart(insp,it,a);
-    a.falha = a.falha&&!a.falha.includes(txt) ? a.falha+' / '+txt : (a.falha||txt);
-    insp.ans[key]=a;
+    const it=scoped(insp).find(i=>i.key===key);
+    setNok(insp,it,{falha:x.txt,acao:x.acao,mat:x.mat});
     insp.applied=insp.applied||{}; insp.applied[t.id]=[...new Set([...(insp.applied[t.id]||[]),ix])];
     if(insp.fim) insp.editado=Date.now();
     touch(insp); toast(`Seq ${it.seq} marcado Não Ok com a anotação`); return render();
