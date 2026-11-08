@@ -269,10 +269,10 @@ const SUG = {
  oleo:[{f:'Baixo nível de óleo',a:'Completar nível do óleo',m:'Óleo 15W40'}],
  arref:[{f:'Nível do líquido de arrefecimento baixo',a:'Completar nível do líquido de arrefecimento',m:'Líquido de arrefecimento'}],
  hidr:[{f:'Nível do óleo hidráulico abaixo do máximo',a:'Completar nível do tanque hidráulico',m:'Óleo hidráulico'}],
- sapata:[{f:'Sapata com desgaste excessivo eixo _ LD',a:'Trocar sapata',m:'1 unidade A15741'},{f:'Sapata com trincas eixo _ LE',a:'Trocar sapata',m:'1 unidade A15741'}],
+ sapata:[{f:'Sapata com desgaste excessivo eixo _ LD',a:'Trocar sapata de freio',m:'A15741 - Sapata de freio (1 un)'},{f:'Sapata com trincas eixo _ LE',a:'Trocar sapata de freio',m:'A15741 - Sapata de freio (1 un)'}],
  folga:[{f:'Não foi realizada a medição da folga das sapatas por falta do instrumento de medição',a:'Realizar medição quando disponível o instrumento',m:''}],
- poste:[{f:'Poste de retenção danificado LE',a:'Troca do cabo',m:'242483-040-00'}],
- raspador:[{f:'Raspador danificado',a:'Troca do raspador',m:'241920 (1) un'}]
+ poste:[{f:'Poste de retenção danificado LE',a:'Troca do cabo de aço',m:'242483-040.00 - Cabo de aço MHC (2 un)'}],
+ raspador:[{f:'Raspador danificado',a:'Trocar raspador',m:''}]
 };
 const ESC = {D:'Diário',S:'Semanal',M:'Mensal',U:'Todos os itens'};
 const LV = {D:1,S:2,M:3,U:3};
@@ -415,6 +415,59 @@ function bar(st){
 }
 let toastT;
 function toast(msg){ let el=document.querySelector('.toast'); if(!el){ el=document.createElement('div'); el.className='toast'; el.setAttribute('role','status'); document.body.appendChild(el);} el.textContent=msg; clearTimeout(toastT); toastT=setTimeout(()=>el.remove(),2600); }
+
+/* ===================== PEÇAS (PART NUMBERS) =====================
+   Ao marcar Não Ok, o material da peça ligada ao item já vai para o registro de tráfego
+   (só quando a peça é óbvia: raspadores, sapata, cabo do poste, cartucho de sílica).
+   Nos outros itens aparecem como sugestão, e "Todas as peças" mostra a lista completa. */
+const PARTS=[
+  {pn:'241338',nome:'Raspador da correia de transferência'},
+  {pn:'241920',nome:'Raspador da correia de piso'},
+  {pn:'A15741',nome:'Sapata de freio'},
+  {pn:'242483-040.00',nome:'Cabo de aço MHC',qtd:2},
+  {pn:'251890',nome:'Correia de transferência'},
+  {pn:'251888',nome:'Correia de piso'},
+  {pn:'241313',nome:'Rolete da correia de transferência'},
+  {pn:'241345',nome:'Rolo excêntrico'},
+  {pn:'241430',nome:'Corrediça do berço',obs:'parafuso H83482 / porca H94908 / arruelas 159115'},
+  {pn:'246071',nome:'Cartucho de sílica'},
+  {pn:'H33007',nome:'Tampão do engate rápido do tanque hidráulico'},
+  {pn:'A26199',nome:'Cadeado'},
+  {pn:'251797',nome:'Antena'},
+  {pn:'114785',nome:'Vidro'},
+  {pn:'131604',nome:'Trava ajustável da escotilha'}
+];
+const PART=Object.fromEntries(PARTS.map(p=>[p.pn,p]));
+// [categoria, teste no texto do item, part numbers, preencher sozinho?]
+const PART_RULES=[
+  ['*',/raspador/i,/transfer/i,['241338'],true],
+  ['*',/raspador/i,/piso/i,['241920'],true],
+  ['tru',/inspecionar.*sapatas/i,null,['A15741'],true],
+  ['tru',/folga das sapatas/i,null,['A15741'],false],
+  ['mec',/poste de reten/i,null,['242483-040.00'],true],
+  ['mec',/cabo de aço/i,null,['242483-040.00'],true],
+  ['hid',/filtro de respiro/i,null,['246071'],true],
+  ['hid',/respiro do tanque/i,null,['246071'],false],
+  ['mec',/correia\/corrente de piso|esteira de piso/i,null,['251888'],false],
+  ['mec',/inspecionar correia (da esteira )?de transfer|rastreamento/i,null,['251890'],false],
+  ['mec',/polias e rolamentos/i,null,['241313'],false],
+  ['mec',/tensionamento/i,null,['241345'],false],
+  ['hid',/tanque hidr/i,null,['H33007'],false],
+  ['pne',/engates rápidos/i,null,['H33007'],false],
+  ['*',/bloqueios/i,null,['A26199'],false]
+];
+function partsFor(cat,it){
+  const txt=it.sub+' '+it.atv, out=[]; let auto=null;
+  for(const [c,r1,r2,pns,a] of PART_RULES){ if(c!=='*'&&c!==cat) continue; if(!r1.test(txt)||(r2&&!r2.test(txt))) continue;
+    pns.forEach(p=>{ if(!out.includes(p)) out.push(p); }); if(a&&!auto) auto=pns[0]; }
+  return {list:out,auto};
+}
+const partTxt=pn=>{ const p=PART[pn]; return `${p.pn} - ${p.nome} (${p.qtd||1} un)${p.obs?' + '+p.obs:''}`; };
+function autoPart(insp,it,a){
+  const {auto}=partsFor(insp.cat,it); if(!auto) return;
+  if(!(a.mat||'').trim()) a.mat=partTxt(auto);
+  if(!(a.acao||'').trim()) a.acao='Trocar '+PART[auto].nome.toLowerCase();
+}
 
 /* ===================== ANOTAÇÕES DA ABA DICAS NO CHECKLIST =====================
    Dicas cujo título/máquina citam o MHC (ex.: "MHC12", "MHC80-12", "Mhc 14") aparecem
@@ -639,6 +692,11 @@ function vReg(){
       ${sg.length?`<div class="sug"><span class="small muted">Toque para preencher</span>${sg.map((s,ix)=>`<button data-act="sugR" data-k="${k}" data-i="${ix}"><b>${h(s.f)}</b>${h(s.a)}${s.m?' · '+h(s.m):''}</button>`).join('')}</div>`:''}
       <div class="fld"><label for="f${k}a">Falha encontrada</label><textarea id="f${k}a" data-rk="${k}" data-f="falha">${h(a.falha)}</textarea></div>
       <div class="fld"><label for="f${k}b">Ação corretiva (solução ou tentativa)</label><textarea id="f${k}b" data-rk="${k}" data-f="acao">${h(a.acao)}</textarea></div>
+      ${(()=>{ const pl=partsFor(insp.cat,i).list; const all=V.allParts===k;
+        const chip=pn=>`<button class="chip" style="text-align:left" data-act="addPart" data-k="${k}" data-pn="${h(pn)}"><b>${h(pn)}</b> · ${h(PART[pn].nome)}${PART[pn].qtd?` (${PART[pn].qtd} un)`:''}</button>`;
+        return `<div class="stack" style="gap:6px"><span class="small muted" style="font-weight:600">${pl.length?'Peça sugerida para este item (toque para pôr no material)':'Peças (toque para pôr no material)'}</span>
+          <div class="chips">${pl.map(chip).join('')}<button class="chip" data-act="allParts" data-k="${k}">${all?'Fechar lista':'Todas as peças'}</button></div>
+          ${all?`<div class="chips">${PARTS.filter(p=>!pl.includes(p.pn)).map(p=>chip(p.pn)).join('')}</div>`:''}</div>`; })()}
       <div class="row"><div class="fld" style="flex:2"><label for="f${k}c">Material</label><input id="f${k}c" data-rk="${k}" data-f="mat" value="${h(a.mat)}"></div>
       <div class="fld"><label for="f${k}d">Nº OS / Ocorrência</label><input id="f${k}d" data-rk="${k}" data-f="os" value="${h(a.os)}"></div></div>
       <label class="chk"><input type="checkbox" data-rk="${k}" data-f="corr" ${a.corr?'checked':''}> Corrigido na hora</label>
@@ -862,7 +920,7 @@ document.addEventListener('click',e=>{
   if(act==='sugR'){
     const s=((window.__sugR||{})[b.dataset.k]||[])[+b.dataset.i]; if(!s) return;
     const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
-    a.falha=s.f; a.acao=s.a; a.mat=s.m; touch(insp);
+    a.falha=s.f; a.acao=s.a; if(s.m) a.mat=s.m; touch(insp);
     const y=window.scrollY; render(); window.scrollTo(0,y); return;
   }
   if(act==='goto'){ const id=V.id, i=S.insps[id];
@@ -875,7 +933,7 @@ document.addEventListener('click',e=>{
     const insp=curInsp(), it=scoped(insp)[V.pos], r=b.dataset.r;
     const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; touch(insp);
     if(V.editOne){ insp.editado=Date.now(); touch(insp); }
-    if(r==='nok'){ V.ask=it.key; render(); return; }
+    if(r==='nok'){ autoPart(insp,it,a); touch(insp); V.ask=it.key; render(); return; }
     if(V.editOne){ toast('Resposta corrigida'); return go(V.retSheet); }
     V.pos++; render(); window.scrollTo(0,0);
     return;
@@ -883,11 +941,20 @@ document.addEventListener('click',e=>{
   if(act==='sug'){
     const s=(window.__sug||[])[+b.dataset.i]; if(!s) return;
     const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key];
-    a.falha=s.f; a.acao=s.a; a.mat=s.m; touch(insp); render();
+    a.falha=s.f; a.acao=s.a; if(s.m) a.mat=s.m; touch(insp); render();
     const f=document.getElementById('f-falha'); if(f) f.scrollIntoView({block:'center'});
     return;
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='allParts'){ V.allParts=V.allParts===b.dataset.k?null:b.dataset.k; const y=window.scrollY; render(); window.scrollTo(0,y); return; }
+  if(act==='addPart'){
+    const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
+    const t=partTxt(b.dataset.pn);
+    if((a.mat||'').includes(b.dataset.pn)){ toast('Essa peça já está no material'); return; }
+    a.mat=(a.mat||'').trim()?a.mat.trim()+' / '+t:t;
+    if(!(a.acao||'').trim()) a.acao='Trocar '+PART[b.dataset.pn].nome.toLowerCase();
+    touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y); toast('Peça adicionada ao material'); return;
+  }
   if(act==='notesToggle'){ V.notesOpen=!V.notesOpen; return render(); }
   if(act==='applyOpen'){ V.apply=b.dataset.id; return render(); }
   if(act==='applyClose'){ V.apply=null; return render(); }
@@ -897,7 +964,7 @@ document.addEventListener('click',e=>{
     if(!key){ toast('Escolha o item primeiro'); return; }
     const it=scoped(insp).find(i=>i.key===key), a=insp.ans[key]||{};
     const txt=x.txt.trim();
-    a.r='nok'; a.t=Date.now();
+    a.r='nok'; a.t=Date.now(); autoPart(insp,it,a);
     a.falha = a.falha&&!a.falha.includes(txt) ? a.falha+' / '+txt : (a.falha||txt);
     insp.ans[key]=a;
     insp.applied=insp.applied||{}; insp.applied[t.id]=[...new Set([...(insp.applied[t.id]||[]),ix])];
