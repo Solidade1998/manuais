@@ -777,9 +777,19 @@ function vMhc(){
     const act=andamento&&tpl?`data-act="wiz" data-id="${andamento.id}"`:quick?`data-act="quick" data-c="${c.id}"`:`data-act="openCat" data-c="${c.id}"`;
     return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}${quick?`<span class="small" style="font-weight:700">Toque para começar agora ›</span>`:''}</button>`;
   }).join('');
-  const fora=frota().fora.includes(m), ntips=notesFor(m).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today)).length;
+  const minha=noteGet(m).trim(), nOpen=V.noteOpen===undefined?!!minha:V.noteOpen;
+  const fora=frota().fora.includes(m), ntips=notesFor(m).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today)).length+(minha?1:0);
+  const notaBox=`<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
+      <button class="row" style="border:0;background:none;padding:0;justify-content:space-between;width:100%;font-weight:700;color:inherit;font-size:17px" data-act="noteToggle" aria-expanded="${nOpen}">
+        <span>📝 Anotações para o checklist${minha&&!nOpen?' <span class="pill p-open">escrita</span>':''}</span><span>${nOpen?'▲':'▼'}</span></button>
+      ${nOpen?`<div class="fld"><label for="nt">O que está avariado no MHC ${h(m)}</label>
+        <textarea id="nt" data-note="${h(m)}" style="min-height:130px" placeholder="ex.: poste de retenção LE, sapata eixo 2 LD, eixo 3 LE e LD, raspador da correia de piso">${h(noteGet(m))}</textarea></div>
+        <span class="small muted">Separe por vírgula ou linha. Fica salvo no celular enquanto você escreve. Quando terminar, toque em <b>Preencher pelas anotações</b> logo abaixo.</span>
+        <section class="card stack" style="gap:8px" id="notePrev">${notePreview(m)}</section>`:`<span class="small muted">${minha?h(minha.length>90?minha.slice(0,90)+'…':minha):'Toque para anotar o que está avariado. No final tudo passa para o checklist.'}</span>`}
+    </section>`;
   return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
     ${fora?`<div class="card small" style="border-left:6px solid var(--warn)"><b>Este MHC está fora da frota de hoje.</b> Dá para fazer o checklist mesmo assim.</div>`:''}
+    ${notaBox}
     ${V.qf?vQuickResult(V.qf):`<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
       <b>⚡ Preencher pelas anotações</b>
       <span class="small muted">Marca Ok em tudo e aplica os Não Ok das anotações de hoje deste MHC (${ntips} anotaç${ntips===1?'ão':'ões'})${frota().rasp.includes(m)?'':', mais o raspador da correia de transferência'}. Você confere e finaliza cada sistema.</span>
@@ -1160,6 +1170,7 @@ document.addEventListener('click',e=>{
   if(act==='frotaEdit'){ V.frotaEdit=!V.frotaEdit; return render(); }
   if(act==='frotaTog'){ setFrota('fora',b.dataset.m); return render(); }
   if(act==='raspTog'){ setFrota('rasp',b.dataset.m); return render(); }
+  if(act==='noteToggle'){ const t=noteGet(V.mhc).trim(); V.noteOpen=!(V.noteOpen===undefined?!!t:V.noteOpen); render(); if(V.noteOpen){ const el=document.getElementById('nt'); if(el) el.focus(); } return; }
   if(act==='qfEsc'){ V.qfEsc=b.dataset.v; return render(); }
   if(act==='qfAsk'){ V.qfAsk=true; return render(); }
   if(act==='qfNo'){ V.qfAsk=false; return render(); }
