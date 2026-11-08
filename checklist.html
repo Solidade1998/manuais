@@ -490,8 +490,46 @@ function tipMhc(t){
   return null;
 }
 const notesFor=mhc=>NOTES.filter(t=>tipMhc(t)===+mhc);
-function segments(t){
-  const out=[]; const push=(txt,by)=>{ const loose=[];
+/* Sapatas de freio do Truque: "eixo 3 LE", "eixo 3 e 4 LE", "eixos 1, 2 LD".
+   Eixo 1 é o primeiro embaixo da cabine do motor; 1 e 2 = truque dianteiro (seq 4),
+   3 e 4 = truque traseiro (seq 5). Vira um trecho por seq, com falha, ação e material. */
+const EIXO_RE=/eixos?\s*((?:[1-4]\s*(?:,|e|\/|\+)?\s*)+)\s*(l\.?\s?e\b|l\.?\s?d\b|lado\s+esquerdo|lado\s+direito|esquerdo|direito)/gi;
+function shoeSegments(lines){
+  const by={'4':{LE:new Set(),LD:new Set()},'5':{LE:new Set(),LD:new Set()}}, used=new Set(), extra={'4':[],'5':[]};
+  lines.forEach((l,ix)=>{ let hit=false; const keys=new Set();
+    for(const m of l.txt.matchAll(EIXO_RE)){ const sd=m[2].replace(/[\s.]/g,'').toLowerCase(), side=(/direito/.test(sd)||sd==='ld')?'LD':'LE';
+      (m[1].match(/[1-4]/g)||[]).forEach(e=>{ const k=+e<=2?'4':'5'; by[k][side].add(+e); keys.add(k); hit=true; }); }
+    if(hit){ used.add(ix);
+      const rest=l.txt.replace(EIXO_RE,' ').replace(/\b(sapatas?|de|do|da|freio|e|ruim|ruins)\b/gi,' ').replace(/[\s,.;:-]+/g,' ').trim();
+      if(rest.length>3) keys.forEach(k=>extra[k].push(l.txt)); }
+  });
+  const out=[];
+  for(const k of ['4','5']){ const parts=[]; let n=0;
+    for(const side of ['LE','LD']){ const ex=[...by[k][side]].sort(); if(!ex.length) continue; n+=ex.length;
+      parts.push(`eixo ${ex.length>1?ex.slice(0,-1).join(', ')+' e '+ex.at(-1):ex[0]} ${side}`); }
+    if(!n) continue;
+    const pl=n>1;
+    let txt=`${pl?'Sapatas':'Sapata'} ${parts.join(' e ')} ${pl?'danificadas':'danificada'}`;
+    if(extra[k].length) txt+=` (${[...new Set(extra[k])].join('; ')})`;
+    out.push({seq:k,txt,by:'',acao:pl?'Troca das sapatas de freio':'Troca da sapata de freio',mat:`A15741 - Sapata de freio (${n} un)`,shoe:true});
+  }
+  return {out,used};
+}
+function segments(t,cat){
+  const out=[];
+  // no Truque, junta todas as menções de eixo/lado da dica (texto e comentários)
+  if(cat==='tru'){
+    const lines=[]; [[t.texto,t.by],...(t.comments||[]).map(c=>[c.texto,c.by])].forEach(([tx,by])=>String(tx||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).forEach(l=>lines.push({txt:l,by})));
+    const r=shoeSegments(lines);
+    if(r.out.length){ out.push(...r.out);
+      const rest=lines.filter((_,i)=>!r.used.has(i));
+      const loose=[]; rest.forEach(l=>{ const m=l.txt.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
+        if(m) out.push({seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),txt:m[3].trim(),by:l.by}); else loose.push(l.txt); });
+      if(loose.length) out.push({seq:'',txt:loose.join(' '),by:''});
+      return out;
+    }
+  }
+  const push=(txt,by)=>{ const loose=[];
     String(txt||'').split(/\n+/).map(l=>l.trim()).filter(Boolean).forEach(l=>{
       const m=l.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
       if(m) out.push({seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),txt:m[3].trim(),by}); else loose.push(l); });
@@ -514,7 +552,7 @@ function vNotes(insp){
   return `<section class="card stack" style="gap:8px;border-left:6px solid var(--accent)">
     <button class="row" style="border:0;background:none;padding:0;justify-content:space-between;width:100%;font-weight:700" data-act="notesToggle">
       <span>📝 Anotações do MHC80-${h(insp.mhc)} (${ns.length})</span><span>${open?'▲':'▼'}</span></button>
-    ${open?ns.map(t=>{ const sg=segments(t), n=(done[t.id]||[]).length;
+    ${open?ns.map(t=>{ const sg=segments(t,insp.cat), n=(done[t.id]||[]).length;
       return `<div class="cm"><b>${h(t.titulo)}</b><span class="small muted">${h(t.by||'')}${n?` · <b style="color:var(--ok)">${n} de ${sg.length} aplicado${n>1?'s':''}</b>`:''}</span>
         ${sg.map(x=>`<div class="small">${x.seq?`<b>Seq ${h(x.seq)}:</b> `:''}${h(x.txt)}</div>`).join('')}
         <button class="btn alt" style="align-self:flex-start;min-height:38px;padding:6px 12px" data-act="applyOpen" data-id="${h(t.id)}">Aplicar no checklist</button></div>`; }).join(''):''}
@@ -523,12 +561,13 @@ function vNotes(insp){
 function vApply(){
   if(!V.apply) return '';
   const insp=curInsp(), t=NOTES.find(x=>x.id===V.apply); if(!insp||!t) return '';
-  const items=scoped(insp), sg=segments(t), done=(insp.applied||{})[t.id]||[];
+  const items=scoped(insp), sg=segments(t,insp.cat), done=(insp.applied||{})[t.id]||[];
   return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="apT"><div class="card stack" style="max-height:88vh;overflow:auto">
     <h3 id="apT">Aplicar no checklist</h3>
     <p class="small muted" style="margin:0">Escolha o item de cada trecho. Ele fica <b>Não Ok</b> e o texto vai como falha no registro de tráfego.</p>
     ${sg.map((x,ix)=>{ const sug=suggestKey(items,x.seq); const ok=done.includes(ix);
-      return `<div class="cm" style="gap:8px"><div>${x.seq?`<b>Seq ${h(x.seq)}:</b> `:''}${h(x.txt)} <span class="small muted">· ${h(x.by||'')}</span></div>
+      return `<div class="cm" style="gap:8px"><div>${x.seq?`<b>Seq ${h(x.seq)}:</b> `:''}${h(x.txt)}${x.by?` <span class="small muted">· ${h(x.by)}</span>`:''}</div>
+        ${x.shoe?`<div class="small muted">Ação: <b>${h(x.acao)}</b> · Material: <b>${h(x.mat)}</b></div>`:''}
         <select id="ap${ix}" class="search" style="padding:10px">${sug?'':'<option value="">Escolha o item…</option>'}${items.map(i=>`<option value="${i.key}" ${i.key===sug?'selected':''}>Seq ${h(i.seq)} · ${h(i.cond===LIG?'ligado':'deslig.')} · ${h(i.atv.slice(0,60))}</option>`).join('')}</select>
         ${ok?`<span class="small" style="color:var(--ok);font-weight:700">✓ Aplicado</span>`:`<button class="btn danger" style="align-self:flex-start" data-act="applySeg" data-i="${ix}">Aplicar como Não Ok</button>`}</div>`; }).join('')}
     <button class="btn ghost full" data-act="applyClose">Fechar</button></div></div>`;
@@ -959,12 +998,16 @@ document.addEventListener('click',e=>{
   if(act==='applyOpen'){ V.apply=b.dataset.id; return render(); }
   if(act==='applyClose'){ V.apply=null; return render(); }
   if(act==='applySeg'){
-    const insp=curInsp(), t=NOTES.find(x=>x.id===V.apply), ix=+b.dataset.i, x=segments(t)[ix];
+    const insp=curInsp(), t=NOTES.find(x=>x.id===V.apply), ix=+b.dataset.i, x=segments(t,insp.cat)[ix];
     const key=(document.getElementById('ap'+ix)||{}).value;
     if(!key){ toast('Escolha o item primeiro'); return; }
     const it=scoped(insp).find(i=>i.key===key), a=insp.ans[key]||{};
     const txt=x.txt.trim();
-    a.r='nok'; a.t=Date.now(); autoPart(insp,it,a);
+    a.r='nok'; a.t=Date.now();
+    if(x.mat){ // sapatas: material com a quantidade certa, no lugar do (1 un) automático
+      const keep=(a.mat||'').split(' / ').filter(p=>p.trim()&&!p.includes(x.mat.split(' - ')[0]));
+      a.mat=[...keep,x.mat].join(' / '); if(!(a.acao||'').trim()||/^Trocar sapata de freio$/i.test(a.acao)) a.acao=x.acao; }
+    autoPart(insp,it,a);
     a.falha = a.falha&&!a.falha.includes(txt) ? a.falha+' / '+txt : (a.falha||txt);
     insp.ans[key]=a;
     insp.applied=insp.applied||{}; insp.applied[t.id]=[...new Set([...(insp.applied[t.id]||[]),ix])];
