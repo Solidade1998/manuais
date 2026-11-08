@@ -270,6 +270,8 @@ CATS.push({ id:'ele', nome:'Elétrico', doc:'Sistema Elétrico', esc:['U'], cond
 const FUNC = (()=>{ try{ const a=JSON.parse(localStorage.getItem('manuais.auth')||'{}')||{}; return a.admin?'all':(a.func||'mec'); }catch(e){ return 'mec'; } })();
 const allowed = id => FUNC==='all' || (FUNC==='ele' ? id==='ele' : id!=='ele');
 const hasItems = c => c.conds.some(cd=>cd.itens.length);
+/* Anotações → checklist valem só para os sistemas mecânicos; o Elétrico é feito na mão */
+const noteCats = () => CATS.filter(c=>c.id!=='ele'&&allowed(c.id)&&hasItems(c));
 const CAT = Object.fromEntries(CATS.map(c=>[c.id,c]));
 
 /* Sugestões para "Não Ok" (tiradas dos registros de tráfego das fotos + exemplo do óleo) */
@@ -519,7 +521,7 @@ function setFrota(k,m){ const f=frota(); f[k]=f[k].includes(m)?f[k].filter(x=>x!
    de transferência (se não for novo) e o espelho entre as rotas. Nada é finalizado:
    você confere e finaliza. */
 function quickFill(mhc,escopo){
-  const today=dayKey(Date.now()), cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const today=dayKey(Date.now()), cats=noteCats();
   const tips=notesFor(mhc).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today));
   const mine=noteGet(mhc); if(mine.trim()) tips.unshift({id:'local',texto:mine,by:'',comments:[]});
   const tpl=Object.values(S.insps).sort((a,b)=>(b.upd||0)-(a.upd||0))[0]||{};
@@ -611,13 +613,7 @@ const FIX_RULES=[
   {re:/cilindro/i, cat:'hid', seq:'8'},
   {re:/(mangueira|tubula\w*|vaza\w*).*hidr|hidr\w*.*(mangueira|vaza)/i, cat:'hid', seq:'5'},
   {re:/(mangueira).*pneum|pneum\w*.*mangueira/i, cat:'pne', seq:'7'},
-  {re:/vaza\w*.*(\bar\b|pneum)|pneum\w*.*vaza/i, cat:'pne', seq:'5'},
-  {re:/ar\s+condicionado/i, cat:'ele', seq:'4', cond:'LIG'},
-  {re:/emerg[êe]ncia/i, cat:'ele', seq:'5', cond:'LIG'},
-  {re:/far[óo]is|farol|sinaliza/i, cat:'ele', seq:'7', cond:'LIG'},
-  {re:/\bluz\b|luzes|l[âa]mpada|ilumina/i, cat:'ele', seq:'6', cond:'LIG'},
-  {re:/bateria/i, cat:'ele', seq:'10', cond:'LIG'},
-  {re:/controle\s+a?\s*cabo/i, cat:'ele', seq:'9', cond:'LIG'}
+  {re:/vaza\w*.*(\bar\b|pneum)|pneum\w*.*vaza/i, cat:'pne', seq:'5'}
 ];
 function pieces(t){
   const out=[]; [[t.texto,t.by],...(t.comments||[]).map(c=>[c.texto,c.by])].forEach(([tx,by])=>
@@ -741,7 +737,7 @@ function vNotes(){
   </div>`;
 }
 function notePreview(m){
-  const fx=findings({texto:noteGet(m),comments:[]}), cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const fx=findings({texto:noteGet(m),comments:[]}), cats=noteCats();
   const prev=fx.found.map(f=>{ const c=f.cat?CAT[f.cat].nome:'(escolher o sistema na folha)';
     return `<div class="cm"><b>${h(c)} · Seq ${h(f.seq)}</b><span class="small">${h(f.falha)}</span>${f.mat?`<span class="small muted">Material: ${h(f.mat)}</span>`:''}</div>`; }).join('');
   const rasp=cats.some(c=>c.id==='mec')&&!frota().rasp.includes(m);
@@ -772,7 +768,7 @@ function vHome(){
   const recent=mhcList();
   const abertas=Object.values(S.insps).filter(i=>!i.fim).sort((a,b)=>(b.upd||0)-(a.upd||0));
   return topBar('Checklist <b>MHC80</b>').replace('<div class="ttl">','<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a><div class="ttl">') + `<div class="stack">
-  <button class="btn y full" style="min-height:58px;font-size:18px" data-act="notes">📝 Anotações do checklist</button>
+  ${noteCats().length?'<button class="btn y full" style="min-height:58px;font-size:18px" data-act="notes">📝 Anotações do checklist</button>':''}
   <div class="row" style="justify-content:space-between"><h3>Escolha o MHC</h3><button class="btn ghost" style="min-height:36px;padding:4px 12px" data-act="frotaEdit">${V.frotaEdit?'Pronto':'Editar frota'}</button></div>
   ${V.frotaEdit?vFrota():mhcRows('openMhc')}
   ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
@@ -841,7 +837,7 @@ function vMhc(){
     </section>`;
   return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
     ${fora?`<div class="card small" style="border-left:6px solid var(--warn)"><b>Este MHC está fora da frota de hoje.</b> Dá para fazer o checklist mesmo assim.</div>`:''}
-    ${notaBox}
+    ${noteCats().length?notaBox:''}
     ${V.qf?vQuickResult(V.qf):''}
     ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
     ${cards}
