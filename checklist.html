@@ -98,6 +98,14 @@ h3{font-size:19px}
 .ans .bx{width:28px;height:28px;border:2px solid currentColor;border-radius:6px;display:grid;place-items:center;font-size:18px;flex:none}
 .ans.ok{color:var(--ok);border-color:var(--ok)}.ans.nok{color:var(--nok);border-color:var(--nok)}.ans.na{color:var(--na);border-color:#A9AFB5}
 .ans.sel.ok{background:var(--ok-soft)}.ans.sel.nok{background:var(--nok-soft)}.ans.sel.na{background:var(--na-soft)}
+.mlist{display:flex;flex-direction:column;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.mrow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:12px 14px;min-height:56px}
+.mrow:first-child{border-top:0}
+.mrow .n{font-family:var(--display);font-weight:700;font-size:22px;min-width:96px}
+.mrow .s{flex:1;min-width:0;font-size:14px;color:var(--muted)}
+.mrow .go{font-size:22px;color:var(--muted)}
+.mrow.out{opacity:.5}
+.mrow.out .n{text-decoration:line-through}
 .cm{border-left:3px solid var(--line);padding:4px 0 4px 12px;display:flex;flex-direction:column;gap:4px}
 .tagw{background:var(--accent-soft);border:2px solid var(--accent);border-radius:8px;padding:8px 10px;font-weight:700;font-size:15px}
 .regcard .sq{font-family:var(--display);font-weight:700;font-size:24px;background:var(--nok);color:#fff;border-radius:6px;padding:2px 10px;white-space:nowrap}
@@ -510,6 +518,7 @@ function setFrota(k,m){ const f=frota(); f[k]=f[k].includes(m)?f[k].filter(x=>x!
 function quickFill(mhc,escopo){
   const today=dayKey(Date.now()), cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
   const tips=notesFor(mhc).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today));
+  const mine=noteGet(mhc); if(mine.trim()) tips.unshift({id:'local',texto:mine,by:'',comments:[]});
   const tpl=Object.values(S.insps).sort((a,b)=>(b.upd||0)-(a.upd||0))[0]||{};
   const report=[]; const loose=[];
   for(const c of cats){
@@ -652,6 +661,51 @@ function topBar(title, back){
   return `<header class="top">${back?`<button class="back" data-act="back" aria-label="Voltar">‹</button>`:''}<div class="ttl">${title}</div><span id="sync" class="sync">${syncText()}</span></header>`;
 }
 
+/* ---------- Anotações do checklist (no celular, uma por MHC por dia) ---------- */
+const KN='mhc80ck.notes.v1';
+let NOTE=(()=>{ try{ return JSON.parse(localStorage.getItem(KN)||'{}')||{}; }catch(e){ return {}; } })();
+const noteKey=m=>dayKey(Date.now())+'|'+m;
+const noteGet=m=>NOTE[noteKey(m)]||'';
+function noteSet(m,t){ NOTE[noteKey(m)]=t; try{ localStorage.setItem(KN,JSON.stringify(NOTE)); }catch(e){} }
+function mhcStatus(m){
+  const today=dayKey(Date.now()), cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const feitos=cats.filter(c=>inspsFor(m,c.id).some(i=>dayKey(i.inicio)===today&&i.fim)).length;
+  const and=cats.filter(c=>inspsFor(m,c.id).some(i=>dayKey(i.inicio)===today&&!i.fim)).length;
+  const nota=noteGet(m).trim();
+  return {feitos,and,tot:cats.length,nota,txt:[feitos?`${feitos}/${cats.length} finalizados`:'',and?`${and} em andamento`:'',nota?'📝 anotação':''].filter(Boolean).join(' · ')||'Nada hoje'};
+}
+function mhcRows(act){
+  const f=frota(), list=[...FROTA.filter(m=>!f.fora.includes(m)),...FROTA.filter(m=>f.fora.includes(m))];
+  return `<div class="mlist">${list.map(m=>{ const fora=f.fora.includes(m), st=mhcStatus(m);
+    return `<button class="mrow ${fora?'out':''}" data-act="${act}" data-m="${m}"><span class="n">MHC ${m}</span>
+      <span class="s">${fora?'Fora da frota hoje':h(st.txt)}</span>${!fora&&st.feitos===st.tot?'<span class="pill p-ok">Ok</span>':''}<span class="go">›</span></button>`; }).join('')}</div>`;
+}
+function vNotes(){
+  if(!V.mhc) return topBar('📝 Anotações do <b>checklist</b>',true)+`<div class="stack">
+    <p class="muted" style="margin:0">Escolha o MHC em que você está para anotar o que está avariado.</p>${mhcRows('noteMhc')}</div>`;
+  const m=V.mhc, txt=noteGet(m);
+  return topBar(`📝 Anotações · <b>MHC ${h(m)}</b>`,true)+`<div class="stack">
+    ${V.qf?vQuickResult(V.qf):''}
+    <div class="fld"><label for="nt">O que está avariado no MHC ${h(m)}</label>
+      <textarea id="nt" data-note="${h(m)}" style="min-height:150px" placeholder="ex.: poste de retenção LE, sapata eixo 2 LD, eixo 3 LE e LD, raspador da correia de piso">${h(txt)}</textarea></div>
+    <span class="small muted">Separe por vírgula ou linha. Fica salvo no celular enquanto você escreve.</span>
+    <section class="card stack" style="gap:8px" id="notePrev">${notePreview(m)}</section>
+    <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="qfEsc" data-v="${k}" class="${(V.qfEsc||'D')===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
+    <button class="btn y full" data-act="noteFill">Preencher checklist do MHC ${h(m)} (${ESC[V.qfEsc||'D']})</button>
+    <button class="btn ghost full" data-act="openMhc" data-m="${h(m)}">Abrir os checklists do MHC ${h(m)}</button>
+  </div>`;
+}
+function notePreview(m){
+  const fx=findings({texto:noteGet(m),comments:[]}), cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const prev=fx.found.map(f=>{ const c=f.cat?CAT[f.cat].nome:'(escolher o sistema na folha)';
+    return `<div class="cm"><b>${h(c)} · Seq ${h(f.seq)}</b><span class="small">${h(f.falha)}</span>${f.mat?`<span class="small muted">Material: ${h(f.mat)}</span>`:''}</div>`; }).join('');
+  const rasp=cats.some(c=>c.id==='mec')&&!frota().rasp.includes(m);
+  return `<b>O que vai entrar no checklist</b>
+      ${prev||'<span class="small muted">Nada reconhecido ainda.</span>'}
+      ${rasp?`<div class="cm"><b>Mecânico · Seq 21 (e 8 na rota ligada)</b><span class="small">Raspador da correia de transferência danificado (raspador não é novo) — só no Mensal</span></div>`:''}
+      ${fx.rest.length?`<div class="small" style="color:var(--warn)"><b>Não reconheci:</b> ${fx.rest.map(r=>h(r.txt)).join(' · ')}. Marque na mão depois.</div>`:''}
+      <span class="small muted">Todo o resto fica <b>Ok</b>.</span>`;
+}
 function vFrota(){
   const f=frota(), today=dayKey(Date.now()), ed=!!V.frotaEdit, cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
   const ativos=FROTA.filter(m=>!f.fora.includes(m));
@@ -662,8 +716,7 @@ function vFrota(){
     const and=cats.some(c=>inspsFor(m,c.id).some(i=>dayKey(i.inicio)===today&&!i.fim));
     return `<button class="chip ${feitos===cats.length?'on':''}" data-act="openMhc" data-m="${m}">${m}${feitos?` · ${feitos}/${cats.length}`:and?' · …':''}</button>`; };
   return `<section class="card stack" style="gap:10px">
-    <div class="row" style="justify-content:space-between"><b>Frota de hoje · ${ativos.length} de ${FROTA.length} MHC</b>
-      <button class="btn ${ed?'y':'ghost'}" style="min-height:36px;padding:4px 12px" data-act="frotaEdit">${ed?'Pronto':'Editar frota'}</button></div>
+    <b>Frota de hoje · ${ativos.length} de ${FROTA.length} MHC</b>
     ${ed?`<span class="small muted">Toque para tirar ou pôr de volta no dia. Os desmarcados ficam para outro dia.</span>`:`<span class="small muted">Toque no MHC para abrir. O número mostra quantos sistemas já foram finalizados hoje.</span>`}
     <div class="chips">${FROTA.map(chip).join('')}</div>
     ${ed?`<b class="small">Raspador da correia de transferência novo</b><span class="small muted">Nos marcados ele não entra como Não Ok automático.</span>
@@ -674,11 +727,9 @@ function vHome(){
   const recent=mhcList();
   const abertas=Object.values(S.insps).filter(i=>!i.fim).sort((a,b)=>(b.upd||0)-(a.upd||0));
   return topBar('Checklist <b>MHC80</b>').replace('<div class="ttl">','<a class="back" href="./" aria-label="Voltar para os manuais" style="text-decoration:none">‹</a><div class="ttl">') + `<div class="stack">
-  <section class="ask">
-    <label for="mhcIn">Qual MHC você está?</label>
-    <div class="mhcin"><span>MHC80-</span><input id="mhcIn" inputmode="numeric" maxlength="3" autocomplete="off"><button data-act="goMhc">Abrir</button></div>
-  </section>
-  ${vFrota()}
+  <button class="btn y full" style="min-height:58px;font-size:18px" data-act="notes">📝 Anotações do checklist</button>
+  <div class="row" style="justify-content:space-between"><h3>Escolha o MHC</h3><button class="btn ghost" style="min-height:36px;padding:4px 12px" data-act="frotaEdit">${V.frotaEdit?'Pronto':'Editar frota'}</button></div>
+  ${V.frotaEdit?vFrota():mhcRows('openMhc')}
   ${abertas.length?`<h3>Em andamento</h3>`+abertas.map(cardInsp).join(''):''}
   ${Object.keys(S.insps).length?`<button class="btn alt full" data-act="browse">Meus checklists por data</button>`:''}
   ${AUTH.admin?`<button class="btn full" data-act="team">Checklists da equipe (admin)</button>`:''}
@@ -1006,6 +1057,7 @@ function render(){
     case 'sheet': html=vSheet(); break;
     case 'reg': html=vReg(); break;
     case 'browse': html=vBrowse(); break;
+    case 'notes': html=vNotes(); break;
     default: html=vHome();
   }
   $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
@@ -1028,6 +1080,7 @@ function goMhc(){
 }
 function back(){
   if((V.v==='wiz'&&V.editOne)||(V.v==='reg'&&V.retSheet)) return go(V.retSheet);
+  if(V.v==='notes'){ if(V.mhc&&!V.direct) return go({v:'notes'}); return go({v:'home'}); }
   if(V.v==='mhc') go({v:'home'});
   else if(V.v==='cat'){ draft=null; go({v:'mhc',mhc:V.mhc}); }
   else if(V.back) go(V.back);
@@ -1098,6 +1151,9 @@ document.addEventListener('click',e=>{
     return;
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
+  if(act==='notes') return go({v:'notes'});
+  if(act==='noteMhc') return go({v:'notes',mhc:b.dataset.m,qfEsc:V.qfEsc});
+  if(act==='noteFill'){ V.qf=quickFill(V.mhc,V.qfEsc||'D'); toast('Checklist do MHC '+V.mhc+' preenchido'); render(); window.scrollTo(0,0); return; }
   if(act==='frotaEdit'){ V.frotaEdit=!V.frotaEdit; return render(); }
   if(act==='frotaTog'){ setFrota('fora',b.dataset.m); return render(); }
   if(act==='raspTog'){ setFrota('rasp',b.dataset.m); return render(); }
@@ -1106,7 +1162,7 @@ document.addEventListener('click',e=>{
   if(act==='qfNo'){ V.qfAsk=false; return render(); }
   if(act==='qfGo'){ V.qfAsk=false; V.qf=quickFill(V.mhc,V.qfEsc||'D'); toast('Checklists preenchidos'); return render(); }
   if(act==='qfClose'){ V.qf=null; return render(); }
-  if(act==='sheetQ') return go({v:'sheet',id:b.dataset.id,back:{v:'mhc',mhc:V.mhc,qf:V.qf,qfEsc:V.qfEsc}});
+  if(act==='sheetQ') return go({v:'sheet',id:b.dataset.id,back:Object.assign({},V)});
   if(act==='allParts'){ V.allParts=V.allParts===b.dataset.k?null:b.dataset.k; const y=window.scrollY; render(); window.scrollTo(0,y); return; }
   if(act==='addPart'){
     const insp=curInsp(), a=insp.ans[b.dataset.k]; if(!a) return;
@@ -1178,8 +1234,10 @@ document.addEventListener('click',e=>{
   if(act==='openR') return openRemote(b.dataset.code,b.dataset.id);
 });
 document.addEventListener('keydown',e=>{ if(e.key==='Enter' && e.target.id==='mhcIn') goMhc(); });
+let noteT;
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.dataset.note){ noteSet(t.dataset.note,t.value); clearTimeout(noteT); noteT=setTimeout(()=>{ const el=document.getElementById('notePrev'); if(el) el.innerHTML=notePreview(t.dataset.note); },400); return; }
   if(t.dataset.f && V.v==='wiz'){
     const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key]; if(!a) return;
     a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; touch(insp); return;
