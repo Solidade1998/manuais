@@ -503,12 +503,15 @@ function setNok(insp,it,f,noMirror){
 }
 
 /* ===================== FROTA DO DIA =====================
-   17 MHCs. Os que estão fora (outra responsabilidade, avariado, fora do comboio)
+   17 MHCs (padrão: só o 16 fora). Os que estão fora (outra responsabilidade, avariado, fora do comboio)
    saem da lista do dia; o checklist deles fica para outro dia. "Raspador novo" diz em
    quais o raspador da correia de transferência já foi trocado (nos outros é Não Ok). */
 const FROTA=Array.from({length:17},(_,i)=>p2(i+1));
-function frota(){ const f=S.prof.frota||{}; return {fora:f.fora||['03','06','10','16'], rasp:f.rasp||['01','15']}; }
-function setFrota(k,m){ const f=frota(); f[k]=f[k].includes(m)?f[k].filter(x=>x!==m):[...f[k],m].sort(); S.prof.frota=f; touchProf(); }
+function frota(){ const f=S.prof.frota||{};
+  // nov/2026: só o 16 fica fora por padrão (troca única, depois vale o que a pessoa marcar)
+  if(f.v!==2) return {fora:['16'], rasp:f.rasp||['01','15']};
+  return {fora:f.fora||['16'], rasp:f.rasp||['01','15']}; }
+function setFrota(k,m){ const f=frota(); f[k]=f[k].includes(m)?f[k].filter(x=>x!==m):[...f[k],m].sort(); f.v=2; S.prof.frota=f; touchProf(); }
 
 /* ===================== PREENCHER PELAS ANOTAÇÕES =====================
    Para um MHC: cria (ou completa) o checklist de cada sistema, marca Ok em tudo que
