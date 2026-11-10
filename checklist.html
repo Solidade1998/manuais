@@ -513,9 +513,10 @@ function setNok(insp,it,f,noMirror){
   if(f.mat){ const pn=f.mat.split(' - ')[0]; const keep=(a.mat||'').split(' / ').filter(p=>p.trim()&&!p.includes(pn)); a.mat=[...keep,f.mat].join(' / '); }
   if(f.acao&&(!(a.acao||'').trim()||/^Trocar /.test(a.acao))) a.acao=f.acao;
   if(!f.mat&&!f.mirrorOf) autoPart(insp,it,a);
+  if(f.src){ a.src=f.src; delete a.manual; }
   insp.ans[it.key]=a;
   if(!noMirror){ const tw=twinOf(insp,it);
-    if(tw&&(insp.ans[tw.key]||{}).r!=='nok') setNok(insp,tw,{falha:`Mesma falha do seq ${it.seq} (rota ${it.cond===DES?'desligada':'ligada'})`,mirrorOf:it.key},true); }
+    if(tw&&(insp.ans[tw.key]||{}).r!=='nok') setNok(insp,tw,{falha:`Mesma falha do seq ${it.seq} (rota ${it.cond===DES?'desligada':'ligada'})`,mirrorOf:it.key,src:f.src},true); }
   return a;
 }
 
@@ -535,6 +536,7 @@ function setFrota(k,m){ const f=frota(); f[k]=f[k].includes(m)?f[k].filter(x=>x!
    está sem resposta e aplica os Não Ok das anotações de hoje desse MHC, do raspador
    de transferência (se não for novo) e o espelho entre as rotas. Nada é finalizado:
    você confere e finaliza. */
+const NOTE_FALHA_RE=/^(Sapatas? eixo|Poste de retenção danificado|Raspador da correia de (transferência|piso) danificado|Cabo de aço do içamento|Mesma falha do seq|Rolete)/i;
 function quickFill(mhc,escopo){
   const today=dayKey(Date.now()), cats=noteCats();
   const tips=notesFor(mhc).filter(t=>[t.created,t.upd,...(t.comments||[]).map(c=>c.at)].some(x=>x&&dayKey(x)===today));
@@ -542,13 +544,18 @@ function quickFill(mhc,escopo){
   const tpl=Object.values(S.insps).sort((a,b)=>(b.upd||0)-(a.upd||0))[0]||{};
   const report=[]; const loose=[];
   for(const c of cats){
-    let insp=inspsFor(mhc,c.id).find(i=>!i.fim&&dayKey(i.inicio)===today);
+    let insp=inspsFor(mhc,c.id).find(i=>!i.fim&&dayKey(i.inicio)===today)||inspsFor(mhc,c.id).find(i=>dayKey(i.inicio)===today);
+    if(insp&&insp.fim) insp.editado=Date.now();
     if(!insp){ const id=newId(); const esc=(c.esc||['D','S','M']).includes(escopo)?escopo:(c.esc||['D'])[0];
       insp={id,mhc,cat:c.id,escopo:esc,rota:'des',oficina:S.prof.oficina||tpl.oficina||'',patio:S.prof.patio||tpl.patio||'',
         mant:JSON.parse(JSON.stringify(S.prof.mant||[])),inicio:Date.now(),fim:0,ans:{},cp:{},auto:true};
       S.insps[id]=insp; }
     const items=scoped(insp), noks=[];
-    const nok=(it,f)=>{ setNok(insp,it,f); noks.push(it.seq); };
+    /* refazer do zero o que veio das anotações: se a anotação mudou (ex.: "eixo 2 LE ok"),
+       o item volta a Ok e a falha/material são recalculados. O que você mexeu na mão fica. */
+    items.forEach(it=>{ const a=insp.ans[it.key]; if(!a||a.manual) return;
+      if(a.src==='nota'||(a.r==='nok'&&NOTE_FALHA_RE.test(a.falha||''))) insp.ans[it.key]={r:'ok',t:Date.now(),...(a.os?{os:a.os}:{})}; });
+    const nok=(it,f)=>{ setNok(insp,it,Object.assign({},f,{src:'nota'})); noks.push(it.seq); };
     tips.forEach(t=>{ const {found,rest}=findings(t);
       found.forEach(f=>{ if(f.cat&&f.cat!==c.id) return; if(!f.cat) return; // número solto: aplicar na mão
         const k=suggestKey(items,f.seq,f.cond); const it=items.find(i=>i.key===k); if(it) nok(it,f); });
@@ -1292,7 +1299,7 @@ document.addEventListener('click',e=>{
   if(act==='editYes'){ const ret={v:'sheet',id:V.id,back:V.back}; return go({v:'wiz',id:V.id,pos:V.editAsk,editOne:true,retSheet:ret}); }
   if(act==='ans'){
     const insp=curInsp(), it=scoped(insp)[V.pos], r=b.dataset.r;
-    const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; touch(insp);
+    const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); a.manual=true; delete a.src; insp.ans[it.key]=a; touch(insp);
     if(V.editOne){ insp.editado=Date.now(); touch(insp); }
     if(r==='nok'){ setNok(insp,it,{}); touch(insp); V.ask=it.key; render(); return; }
     if(V.editOne){ toast('Resposta corrigida'); return go(V.retSheet); }
@@ -1342,7 +1349,7 @@ document.addEventListener('click',e=>{
     const key=(document.getElementById('ap'+ix)||{}).value;
     if(!key){ toast('Escolha o item primeiro'); return; }
     const it=scoped(insp).find(i=>i.key===key);
-    setNok(insp,it,{falha:x.txt,acao:x.acao,mat:x.mat});
+    setNok(insp,it,{falha:x.txt,acao:x.acao,mat:x.mat}); insp.ans[it.key].manual=true;
     insp.applied=insp.applied||{}; insp.applied[t.id]=[...new Set([...(insp.applied[t.id]||[]),ix])];
     if(insp.fim) insp.editado=Date.now();
     touch(insp); toast(`Seq ${it.seq} marcado Não Ok com a anotação`); return render();
@@ -1406,7 +1413,7 @@ document.addEventListener('input',e=>{
   }
   if(t.dataset.rk && V.v==='reg'){
     const insp=curInsp(), a=insp.ans[t.dataset.rk]; if(!a) return;
-    a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; touch(insp); return;
+    a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; if(t.dataset.f!=='os'&&t.dataset.f!=='corr'){ a.manual=true; delete a.src; } touch(insp); return;
   }
   if(draft && t.dataset.d){ draft[t.dataset.d]=t.value; return; }
   if(draft && t.dataset.m!==undefined){ draft.mant[+t.dataset.m][t.dataset.k]=t.value; return; }
