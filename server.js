@@ -173,9 +173,9 @@ export async function onRequest(context) {
       return new Response(stream, { headers: { 'content-type': 'application/octet-stream', 'cache-control': 'private, no-store' } });
     }
 
-    // ---------------- dicas de procedimentos (todos que usam o app) ----------------
-    // qualquer pessoa cria dicas e comenta; editar/apagar só o autor ou o admin
+    // ---------------- dicas de procedimentos (só o admin) ----------------
     if (path[0] === 'tips') {
+      if (!who.admin) return fail('A aba Dicas é só do administrador.', 403);
       if (!env.CK) return fail('Servidor sem o banco de dicas (CK).', 500);
       const store = env.CK.get(env.CK.idFromName('dicas'));
       const sid = v => String(v || '').replace(/[^a-z0-9-]/gi, '').slice(0, 60);

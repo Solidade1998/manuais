@@ -10,8 +10,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<script>/* só abre para quem já entrou com o código no app */
-try{ var a=JSON.parse(localStorage.getItem('manuais.auth')||'{}'); if(!a||!a.token) location.replace('./'); }catch(e){ location.replace('./'); }</script>
+<script>/* só o administrador */
+try{ var a=JSON.parse(localStorage.getItem('manuais.auth')||'{}'); if(!a||!a.token||!a.admin) location.replace('./'); }catch(e){ location.replace('./'); }</script>
 <title>Dicas de procedimentos</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&display=swap" rel="stylesheet">

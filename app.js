@@ -428,7 +428,7 @@ async function checkAccess() {
   try {
     const r = await api('me');
     AUTH.lastOk = Date.now(); AUTH.admin = r.admin; AUTH.name = r.name; AUTH.func = r.func || 'mec'; AUTH.storage = r.storage; lsSet(LS_AUTH, AUTH);
-    $('#btnAdmin').hidden = !AUTH.admin;
+    $('#btnAdmin').hidden = !AUTH.admin; $('[data-tab=dicas]').hidden = !AUTH.admin;
     return true;
   } catch (e) {
     if (e.status === 403 && e.data?.revoked && Date.now() - (AUTH.issued || 0) > 5 * 60000) {
@@ -1957,7 +1957,7 @@ function summarySheet(r, fromHist) {
 // ---------------------------------------------------------------------
 let started = false;
 async function startApp() {
-  $('#btnAdmin').hidden = !AUTH.admin;
+  $('#btnAdmin').hidden = !AUTH.admin; $('[data-tab=dicas]').hidden = !AUTH.admin;
   if (!started) {
     started = true;
     try { S.docs = await dbAll('docs'); }
