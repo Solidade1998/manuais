@@ -98,6 +98,21 @@ h3{font-size:19px}
 .ans .bx{width:28px;height:28px;border:2px solid currentColor;border-radius:6px;display:grid;place-items:center;font-size:18px;flex:none}
 .ans.ok{color:var(--ok);border-color:var(--ok)}.ans.nok{color:var(--nok);border-color:var(--nok)}.ans.na{color:var(--na);border-color:#A9AFB5}
 .ans.sel.ok{background:var(--ok-soft)}.ans.sel.nok{background:var(--nok-soft)}.ans.sel.na{background:var(--na-soft)}
+.pp-row{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;background:var(--paper);border:0;border-top:1px solid var(--line);padding:12px 14px}
+.pp-row:first-child{border-top:0}
+.pp-row .sq{font-family:var(--display);font-weight:700;font-size:26px;min-width:52px;text-align:center;line-height:1.1}
+.pp-row .mid{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.pp-row .res{font-family:var(--display);font-weight:700;font-size:20px;letter-spacing:.3px}
+.pp-row .res.ok{color:var(--ok)}.pp-row .res.nok{color:var(--nok)}.pp-row .res.na{color:var(--na)}.pp-row .res.out{color:#9AA1A6;font-size:15px}
+.pp-row.done{background:var(--ok-soft)}
+.pp-row.done .res::after{content:"  ✓ passado";font-size:13px;color:var(--ok)}
+.pp-tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px}
+.pp-tabs .chip{white-space:nowrap}
+.pp-reg{display:flex;flex-direction:column;gap:6px;background:var(--paper);border:2px solid var(--nok);border-radius:10px;padding:12px;text-align:left;width:100%}
+.pp-reg dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:16px}
+.pp-reg dt{font-weight:700;color:var(--muted);font-size:13px;text-transform:uppercase;padding-top:2px}
+.pp-reg dd{margin:0}
+.pp-reg.done{border-color:var(--ok);background:var(--ok-soft)}
 .mlist{display:flex;flex-direction:column;background:var(--paper);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 .mrow{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:0;border-top:1px solid var(--line);padding:12px 14px;min-height:56px}
 .mrow:first-child{border-top:0}
@@ -802,9 +817,75 @@ function noteAct(m){
     <div class="seg" role="group" aria-label="Escopo">${['D','S','M'].map(k=>`<button data-act="qfEsc" data-v="${k}" class="${(V.qfEsc||'D')===k?'on':''}">${ESC[k]}</button>`).join('')}</div>
     <button class="btn y full" data-act="qfAsk">Sim, passar para o checklist ${ESC[V.qfEsc||'D'].toLowerCase()}</button></div>`;
 }
+/* ===================== PASSAR PARA A FOLHA =====================
+   Uma folha por vez, na ordem do papel: cada sistema e, dentro dele, cada rota
+   (motor desligado / ligado), e no fim o verso (registro de tráfego) do sistema.
+   Tocar numa linha marca "passado" para saber onde parou. */
+function paperDocs(mhc,day){
+  const out=[];
+  CATS.filter(c=>allowed(c.id)&&hasItems(c)).forEach(c=>{
+    const insp=inspsFor(mhc,c.id).filter(i=>dayKey(i.inicio)===day)[0]; if(!insp) return;
+    c.conds.forEach((cd,ci)=>out.push({kind:'route',insp,cat:c,ci,cond:cd.c}));
+    out.push({kind:'reg',insp,cat:c});
+  });
+  return out;
+}
+function paperDays(mhc){ return [...new Set(inspsFor(mhc).map(i=>dayKey(i.inicio)))].sort().reverse(); }
+const RES_TXT={ok:'( X ) OK',nok:'( X ) NÃO OK',na:'( X ) NÃO SE APLICA'};
+function vPaper(){
+  const m=V.mhc, days=paperDays(m); const day=V.day||days[0];
+  if(!day) return topBar(`Folha · <b>MHC ${h(m)}</b>`,true)+`<p class="muted">Nenhum checklist deste MHC ainda.</p>`;
+  const docs=paperDocs(m,day); const ix=Math.min(V.ix||0,docs.length-1), d=docs[ix];
+  const tabName=x=>x.kind==='reg'?`${x.cat.nome} · verso`:`${x.cat.nome}${x.cat.conds.length>1?' · '+(x.cond===LIG?'ligado':'desligado'):''}`;
+  let html=topBar(`Passar para a folha · <b>MHC ${h(m)}</b>`,true)+`<div class="stack">
+    ${days.length>1?`<div class="pp-tabs">${days.map(k=>`<button class="chip ${k===day?'on':''}" data-act="ppDay" data-v="${k}">${dayLabel(k)}</button>`).join('')}</div>`:`<span class="small muted">${dayLabel(day)}</span>`}
+    <div class="pp-tabs">${docs.map((x,i)=>`<button class="chip ${i===ix?'on':''}" data-act="ppGo" data-i="${i}">${h(tabName(x))}</button>`).join('')}</div>`;
+  const insp=d.insp, pp=insp.pp||{}, mant=(insp.mant||[]).filter(x=>x.nome||x.mat);
+  if(d.kind==='route'){
+    const rows=itemsOf(insp).filter(i=>i.ci===d.ci), sc=rows.filter(i=>i.inScope), feitos=sc.filter(i=>pp[i.key]).length;
+    html+=`<section class="card stack" style="gap:6px">
+      <b style="font-size:17px">${h(insp.mhc?'Folha: '+d.cat.doc:'')}</b>
+      <div class="cond ${d.cond===LIG?'lig':''}" style="font-size:16px">Condição: ${h(d.cond)}</div>
+      <div class="hdrgrid">
+        <div><span>Local</span><b>Oficina: ${h(insp.oficina)||'—'} · Pátio: ${h(insp.patio)||'—'}</b></div>
+        <div><span>Equipamento</span><b>MHC80: ${h(insp.mhc)}</b></div>
+        <div><span>Início</span><b>${fmtD(insp.inicio)} às ${fmtH(insp.inicio)}</b></div>
+        <div><span>Fim</span><b>${insp.fim?fmtD(insp.fim)+' às '+fmtH(insp.fim):'não finalizado'}</b></div>
+        <div><span>Escopo</span><b>(X) ${ESC[insp.escopo]}</b></div>
+        <div><span>Visita · Duração</span><b>N/A · Não medido</b></div>
+        <div style="grid-column:1/-1"><span>Mantenedores (nome / matrícula / turma)</span>${mant.length?mant.map(x=>`<b>${h(x.nome)} / ${h(x.mat)} / ${h(x.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
+      </div></section>
+      <span class="small muted">Toque na linha depois de passar para o papel · ${feitos} de ${sc.length} passados</span>
+      <div class="mlist">${rows.map(i=>{ const a=insp.ans[i.key]||{};
+        const res=!i.inScope?`<span class="res out">${i.rotaOut?'rota feita em outra inspeção':'fora do escopo · deixar em branco'}</span>`
+          :a.r?`<span class="res ${a.r}">${RES_TXT[a.r]}</span>`:`<span class="res out" style="color:var(--warn)">SEM RESPOSTA</span>`;
+        return `<button class="pp-row ${i.inScope&&pp[i.key]?'done':''}" ${i.inScope?`data-act="ppTick" data-k="${i.key}"`:''}>
+          <span class="sq">${h(i.seq)}</span><span class="mid"><span class="sub">${h(i.sis)} · ${h(i.sub)} · ${ESC[i.esc]}</span>
+          <span style="font-size:15px">${h(i.atv)}</span>${res}
+          ${a.r==='nok'&&a.falha?`<span class="small" style="color:var(--nok)">Falha: ${h(a.falha)}</span>`:''}</span></button>`; }).join('')}</div>`;
+  } else {
+    const reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok');
+    html+=`<section class="card stack" style="gap:6px"><b style="font-size:17px">Verso: Registro de solicitações de tráfego</b>
+      <span class="small muted">${h(d.cat.doc)} · MHC80-${h(insp.mhc)} · ${reg.length} linha${reg.length===1?'':'s'}. Toque no cartão depois de passar.</span></section>
+      ${reg.length?reg.map(i=>{ const a=insp.ans[i.key], k='reg:'+i.key;
+        return `<button class="pp-reg ${pp[k]?'done':''}" data-act="ppTick" data-k="${k}">
+          <div class="row" style="justify-content:space-between;width:100%"><b style="font-family:var(--display);font-size:24px">Seq ${h(i.seq)}</b>
+          <span class="small muted">${h(i.cond===LIG?'motor ligado':'motor desligado')}${pp[k]?' · ✓ passado':''}</span></div>
+          <dl><dt>Falha</dt><dd>${h(a.falha)||'<b style="color:var(--warn)">falta descrever</b>'}</dd>
+          <dt>Ação</dt><dd>${h(a.acao)||'—'}</dd><dt>Material</dt><dd>${h(a.mat)||'—'}</dd>
+          ${a.os?`<dt>Nº OS</dt><dd>${h(a.os)}</dd>`:''}${a.corr?`<dt>Obs.</dt><dd>(X) Corrigido</dd>`:''}</dl></button>`; }).join('')
+      :`<div class="card">Nenhum Não Ok neste sistema. O verso fica em branco.</div>`}`;
+  }
+  html+=`<div class="row" style="justify-content:space-between">
+    <button class="btn ghost" data-act="ppGo" data-i="${ix-1}" ${ix<=0?'disabled':''}>‹ Folha anterior</button>
+    <button class="btn y" data-act="ppGo" data-i="${ix+1}" ${ix>=docs.length-1?'disabled':''}>Próxima folha ›</button></div>
+    <button class="btn ghost full" data-act="sheetQ" data-id="${insp.id}">Corrigir respostas (abrir a folha do app)</button></div>`;
+  return html;
+}
 function vQuickResult(r){
   return `<section class="card stack" style="gap:8px;border-left:6px solid var(--ok)">
     <b>Preenchido pelas anotações</b>
+    <button class="btn full" data-act="paper" data-m="${h(r.report[0]?S.insps[r.report[0].id].mhc:'')}">📄 Passar para a folha, uma por vez</button>
     ${r.report.map(x=>`<button class="catcard" data-act="sheetQ" data-id="${x.id}"><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${h(CAT[x.cat].nome)}</span>${x.noks.length?`<span class="pill p-nok">${x.noks.length} Não Ok</span>`:'<span class="pill p-ok">Tudo Ok</span>'}</div>
       ${x.noks.length?`<span class="small muted">Seq ${x.noks.map(h).join(', ')}</span>`:''}<span class="small" style="font-weight:700">Conferir a folha ›</span></button>`).join('')}
     ${r.loose.length?`<div class="small" style="color:var(--warn)"><b>Não reconheci, aplique na mão:</b> ${r.loose.map(h).join(' · ')}</div>`:''}
@@ -837,6 +918,7 @@ function vMhc(){
     </section>`;
   return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
     ${fora?`<div class="card small" style="border-left:6px solid var(--warn)"><b>Este MHC está fora da frota de hoje.</b> Dá para fazer o checklist mesmo assim.</div>`:''}
+    ${paperDays(m).length?`<button class="btn full" data-act="paper" data-m="${h(m)}">📄 Passar para a folha (consulta sistema por sistema)</button>`:''}
     ${noteCats().length?notaBox:''}
     ${V.qf?vQuickResult(V.qf):''}
     ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
@@ -1115,6 +1197,7 @@ function render(){
     case 'reg': html=vReg(); break;
     case 'browse': html=vBrowse(); break;
     case 'notes': html=vNotes(); break;
+    case 'paper': html=vPaper(); break;
     default: html=vHome();
   }
   $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
@@ -1209,6 +1292,11 @@ document.addEventListener('click',e=>{
   }
   if(act==='next'){ V.pos++; render(); window.scrollTo(0,0); return; }
   if(act==='notes') return go({v:'notes'});
+  if(act==='paper') return go({v:'paper',mhc:b.dataset.m||V.mhc,ix:0,back:Object.assign({},V)});
+  if(act==='ppGo') return go(Object.assign({},V,{ix:+b.dataset.i}));
+  if(act==='ppDay') return go(Object.assign({},V,{day:b.dataset.v,ix:0}));
+  if(act==='ppTick'){ const docs=paperDocs(V.mhc,V.day||paperDays(V.mhc)[0]); const insp=docs[Math.min(V.ix||0,docs.length-1)].insp;
+    insp.pp=insp.pp||{}; insp.pp[b.dataset.k]=!insp.pp[b.dataset.k]; saveLocal(); const y=window.scrollY; render(); window.scrollTo(0,y); return; }
   if(act==='noteMhc') return go({v:'notes',mhc:b.dataset.m,qfEsc:V.qfEsc});
   if(act==='noteFill'){ V.qf=quickFill(V.mhc,V.qfEsc||'D'); toast('Checklist do MHC '+V.mhc+' preenchido'); render(); window.scrollTo(0,0); return; }
   if(act==='frotaEdit'){ V.frotaEdit=!V.frotaEdit; return render(); }
