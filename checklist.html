@@ -597,7 +597,7 @@ const EIXO_RE=new RegExp('eixos?\\s*((?:[1-4]\\s*(?:,|e|\\/|\\+)?\\s*)+)\\s*((?:
 const sideOf=t=>{ const sd=t.replace(/[\s.]/g,'').toLowerCase(); return (/direito/.test(sd)||sd==='ld')?'LD':'LE'; };
 const sidesIn=t=>[...new Set((t.match(new RegExp(SIDE_RE,'gi'))||[]).map(sideOf))];
 const MEC_RULES=[
-  {re:/poste\s+de\s+reten/i, seqs:['11','17'], nome:'Poste de retenção', falha:s=>`Poste de retenção danificado ${s}`.trim(), acao:'Troca do cabo de aço', pn:'242483-040.00', porLado:true},
+  {re:/\bposte\b/i, seqs:['11','17'], nome:'Poste de retenção', falha:s=>`Poste de retenção danificado ${s}`.trim(), acao:'Troca do cabo de aço', pn:'242483-040.00', porLado:true},
   {re:/raspador.*transf|transf.*raspador/i, seqs:['21'], falha:()=>'Raspador da correia de transferência danificado', acao:'Troca do raspador da correia de transferência', pn:'241338'},
   {re:/raspador.*piso|piso.*raspador/i, seqs:['18'], falha:()=>'Raspador da correia de piso danificado', acao:'Troca do raspador da correia de piso', pn:'241920'},
   {re:/cabo\s+de\s+a[cç]o.*i[cç]amento|i[cç]amento.*cabo/i, seqs:['13'], falha:()=>'Cabo de aço do içamento da correia danificado', acao:'Troca do cabo de aço', pn:'242483-040.00'}
@@ -636,19 +636,33 @@ function pieces(t){
   return out;
 }
 /* achados de uma dica: [{cat, cond, seq, falha, acao, mat, by}] + pedaços sem regra */
+/* "ok", "boa", "nova"… = está bom: tira da lista de problemas.
+   Ex.: "sapata eixo 1, 2, 3, 4 LD ruim / eixo 1, 3, 4 LE ruim / eixo 2 LE ok" → só a 2 LE fica boa.
+   Também: "todas as sapatas ruins menos eixo 2 LE". */
+const GOOD_RE=/\b(ok|boa|boas|bom|bons|nov[ao]s?|normal|em\s+ordem|sem\s+problemas?)\b/i;
+const EXCEPT_RE=/\b(menos|exceto|tirando|fora|salvo|s[oó]\s+n[aã]o)\b/i;
 function findings(t){
   const ps=pieces(t), found=[], rest=[];
   const shoe={'4':{LE:new Set(),LD:new Set()},'5':{LE:new Set(),LD:new Set()}}, poste=new Set(); let posteHit=false;
+  const goodShoe=new Set(), goodPoste=new Set();
   const rol=[]; let rolN=0;
+  const addShoe=(e,sd,good)=>{ if(good) goodShoe.add(e+sd); else shoe[+e<=2?'4':'5'][sd].add(+e); };
   ps.forEach(pc=>{
     let hit=false;
+    const all=/\btod[ao]s\b/i.test(pc.txt)&&/sapata/i.test(pc.txt);
+    if(all){ [1,2,3,4].forEach(e=>['LE','LD'].forEach(sd=>addShoe(e,sd,false))); hit=true; }
+    const ex=pc.txt.search(EXCEPT_RE);
     for(const m of pc.txt.matchAll(EIXO_RE)){ const sides=sidesIn(m[2]);
-      (m[1].match(/[1-4]/g)||[]).forEach(e=>sides.forEach(sd=>shoe[+e<=2?'4':'5'][sd].add(+e))); hit=true; }
+      const good=(ex>=0&&m.index>ex)||(!all&&GOOD_RE.test(pc.txt));
+      (m[1].match(/[1-4]/g)||[]).forEach(e=>sides.forEach(sd=>addShoe(e,sd,good))); hit=true; }
     if(hit) return;
+    if(GOOD_RE.test(pc.txt)&&!COND_RE.test(pc.txt)&&!/\bruim\b/i.test(pc.txt)){ // algo dito como bom: não é problema
+      if(/\bposte\b/i.test(pc.txt)) sidesIn(pc.txt).forEach(x=>goodPoste.add(x));
+      return; }
     if(/rolete/i.test(pc.txt)){ const nums=(pc.txt.replace(/rolete[s]?/ig,' ').match(/\b[1-4]\b/g)||[]), sides=Math.max(1,sidesIn(pc.txt).length);
       rolN+=Math.max(1,nums.length)*sides; rol.push(cleanTxt(pc.txt,false).replace(/ com defeito$/,' danificado')); return; }
     const r=MEC_RULES.find(x=>x.re.test(pc.txt));
-    if(r){ if(r.porLado){ posteHit=true; sidesIn(pc.txt).forEach(x=>poste.add(x)); return; }
+    if(r){ if(r.porLado){ posteHit=true; const sd=sidesIn(pc.txt); (sd.length?sd:['LE','LD']).forEach(x=>poste.add(x)); return; }
       r.seqs.forEach(sq=>found.push({cat:'mec',cond:DES,seq:sq,falha:r.falha(''),acao:r.acao,mat:partTxt(r.pn),by:pc.by})); return; }
     const m=pc.txt.match(/^(?:seq\.?|item)?\s*(\d{1,2})\s*(fs|tf)?\s*[-–:.)]\s*(.+)$/i);
     if(m){ found.push({cat:null,seq:m[1]+(m[2]?' '+m[2].toUpperCase():''),falha:m[3].trim(),by:pc.by}); return; }
@@ -659,13 +673,15 @@ function findings(t){
   });
   if(rol.length) found.push({cat:'mec',cond:DES,seq:ROLETE_SEQ,falha:rol.join('; '),acao:rolN>1?'Troca dos roletes da correia de transferência':'Troca do rolete da correia de transferência',
     mat:`241313 - Rolete da correia de transferência (${rolN} un)`});
+  goodShoe.forEach(g=>{ const e=+g[0], sd=g.slice(1); shoe[e<=2?'4':'5'][sd].delete(e); });
+  goodPoste.forEach(sd=>poste.delete(sd)); if(posteHit&&!poste.size) posteHit=false;
   for(const k of ['4','5']){ const parts=[]; let n=0;
     for(const sd of ['LE','LD']){ const ex=[...shoe[k][sd]].sort(); if(!ex.length) continue; n+=ex.length;
       parts.push(`eixo ${ex.length>1?ex.slice(0,-1).join(', ')+' e '+ex.at(-1):ex[0]} ${sd}`); }
     if(n) found.push({cat:'tru',cond:DES,seq:k,falha:`${n>1?'Sapatas':'Sapata'} ${parts.join(' e ')} ${n>1?'danificadas':'danificada'}`,
       acao:n>1?'Troca das sapatas de freio':'Troca da sapata de freio',mat:`A15741 - Sapata de freio (${n} un)`});
   }
-  if(posteHit){ const sd=[...poste].sort().join(' e '), r=MEC_RULES[0], q=Math.max(1,poste.size)*2;
+  if(posteHit){ const sd=[...poste].sort((x,y)=>x==='LE'?-1:y==='LE'?1:0).join(' e '), r=MEC_RULES[0], q=Math.max(1,poste.size)*2;
     r.seqs.forEach(sq=>found.push({cat:'mec',cond:DES,seq:sq,falha:r.falha(sd),acao:r.acao,mat:`242483-040.00 - Cabo de aço MHC (${q} un)`})); }
   return {found,rest};
 }
@@ -912,7 +928,7 @@ function vMhc(){
         <span>📝 Anotações para o checklist${minha&&!nOpen?' <span class="pill p-open">escrita</span>':''}</span><span>${nOpen?'▲':'▼'}</span></button>
       ${nOpen?`<div class="fld"><label for="nt">Problemas encontrados no MHC ${h(m)}</label>
         <textarea id="nt" data-note="${h(m)}" style="min-height:140px" placeholder="ex.:\nPoste de retenção LD ruim\nSapata eixo 3 LD e LE\nRolete 1 LD travado, rolete 4 LD avariado\nFluido de arrefecimento baixo">${h(noteGet(m))}</textarea></div>
-        <span class="small muted">Um problema por linha ou separados por vírgula. Pode escrever "ruim" ou não. Roletes: 1 é o de baixo, 4 o de cima. Fica salvo no celular enquanto você escreve.</span>
+        <span class="small muted">Um problema por linha ou separados por vírgula. Pode escrever "ruim" ou não; o que estiver bom, escreva "ok" (ex.: eixo 2 LE ok). Roletes: 1 é o de baixo, 4 o de cima. Fica salvo no celular enquanto você escreve.</span>
         <section class="card stack" style="gap:8px" id="notePrev">${notePreview(m)}</section>`:`<span class="small muted">${minha?h(minha.length>90?minha.slice(0,90)+'…':minha):'Toque para anotar os problemas encontrados. No final eu pergunto se você quer passar tudo para o checklist.'}</span>`}
       <div id="noteAct">${V.qf?'':noteAct(m)}</div>
     </section>`;
