@@ -1002,6 +1002,61 @@ function vNext(){
     <button class="btn ${pend.length?'ghost':'y'} full" data-act="paper" data-m="${h(m)}">📄 Passar para a folha${pend.length?' o que já está pronto':''}</button>
     <button class="btn ghost full" data-act="openMhc" data-m="${h(m)}">Voltar para o MHC ${h(m)}</button></div>`;
 }
+/* ===================== ATUALIZAR CHECKLISTS JÁ FEITOS =====================
+   Roda uma vez por versão (MIG_V) em todos os checklists guardados no celular:
+   - material no formato novo ("A15741 - Sapata de freio (1 un)"), raspador de
+     transferência com o part number certo (241338);
+   - Não Ok sem material/ação recebe a peça quando ela é óbvia;
+   - anotação daquele dia/MHC é lida de novo com as regras atuais (ok, eixos, poste…),
+     sem mexer no que foi marcado/escrito à mão;
+   - Não Ok numa rota marca o mesmo componente na outra;
+   - anotação de item de escopo maior fica no aviso vermelho.
+   Itens de escopo maior já aparecem como "Não se aplica" na folha. */
+const MIG_V=3;
+function normMat(cat,it,mat){
+  if(!mat) return mat;
+  let m=String(mat).trim();
+  if(/^1\s*unidade\s*A15741$/i.test(m)||/^A15741$/i.test(m)) return partTxt('A15741');
+  if(/^242483-040[-.]00$/.test(m)) return partTxt('242483-040.00');
+  if(/^241920\s*\(1\)\s*un$/i.test(m)||/^241920$/.test(m)) m=partTxt('241920');
+  if(PART[m]) m=partTxt(m);
+  // raspador da correia de transferência com o número do raspador de piso (sugestão antiga)
+  if(it&&/raspador/i.test(it.atv+it.sub)&&/transfer/i.test(it.atv+it.sub)&&m.includes('241920')) m=m.replace(/241920[^/]*/,partTxt('241338'));
+  return m;
+}
+function migrateAll(){
+  let ver=0; try{ ver=+localStorage.getItem('mhc80ck.mig')||0; }catch(e){}
+  if(ver>=MIG_V) return 0;
+  let n=0;
+  Object.values(S.insps).forEach(insp=>{
+    if(!CAT[insp.cat]) return;
+    const before=JSON.stringify(insp.ans)+JSON.stringify(insp.foraEscopo||[]);
+    const items=scoped(insp);
+    // 1) material e peça
+    items.forEach(it=>{ const a=insp.ans[it.key]; if(!a||a.r!=='nok') return;
+      if(a.mat) a.mat=String(a.mat).split(' / ').map(x=>normMat(insp.cat,it,x)).join(' / ');
+      if(!a.mirrorOf&&!/^Mesma falha do seq/.test(a.falha||'')) autoPart(insp,it,a); });
+    // 2) anotação do dia lida de novo
+    const txt=NOTE[dayKey(insp.inicio)+'|'+insp.mhc]||'';
+    if(txt.trim()){
+      items.forEach(it=>{ const a=insp.ans[it.key]; if(!a||a.manual) return;
+        if(a.src==='nota'||(a.r==='nok'&&NOTE_FALHA_RE.test(a.falha||''))) insp.ans[it.key]={r:'ok',t:a.t||Date.now(),...(a.os?{os:a.os}:{})}; });
+      const fora=[];
+      findings({texto:txt,comments:[]}).found.forEach(f=>{ if(f.cat!==insp.cat) return;
+        const k=suggestKey(items,f.seq,f.cond), it=items.find(i=>i.key===k);
+        if(it) setNok(insp,it,Object.assign({},f,{src:'nota'}));
+        else { const ie=itemEscOf(insp.cat,f.seq,f.cond); if(ie&&LV[ie]>LV[insp.escopo]) fora.push({seq:f.seq,falha:f.falha,esc:ie}); } });
+      insp.foraEscopo=fora;
+    }
+    // 3) mesmo Não Ok na outra rota
+    items.forEach(it=>{ const a=insp.ans[it.key]; if(!a||a.r!=='nok'||/^Mesma falha do seq/.test(a.falha||'')) return;
+      const tw=twinOf(insp,it); if(tw&&(insp.ans[tw.key]||{}).r!=='nok') setNok(insp,tw,{falha:`Mesma falha do seq ${it.seq} (rota ${it.cond===DES?'desligada':'ligada'})`,mirrorOf:it.key,src:a.src},true); });
+    if(JSON.stringify(insp.ans)+JSON.stringify(insp.foraEscopo||[])!==before){ insp.upd=Date.now(); n++; }
+  });
+  saveLocal(); try{ localStorage.setItem('mhc80ck.mig',String(MIG_V)); }catch(e){}
+  if(n) schedule(2000);
+  return n;
+}
 function vQuickResult(r){
   return `<section class="card stack" style="gap:8px;border-left:6px solid var(--ok)">
     <b>Preenchido pelas anotações</b>
@@ -1577,6 +1632,7 @@ document.addEventListener('change',e=>{ const t=e.target;
 
 /* ===================== START ===================== */
 loadLocal();
+try{ const nMig=migrateAll(); if(nMig) setTimeout(()=>toast(nMig+' checklist'+(nMig>1?'s':'')+' antigo'+(nMig>1?'s':'')+' atualizado'+(nMig>1?'s':'')+' com as regras novas'),800); }catch(e){ console.error(e); }
 if(location.hash==='#equipe'&&AUTH.admin){ V={v:'browse',src:'team'}; render(); loadTeam(); } else render();
 initCloud();
 </script>
