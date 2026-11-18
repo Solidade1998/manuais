@@ -1052,7 +1052,10 @@ function vMhc(){
     ${onlyEle?'':`<h3 style="margin-top:4px">Opção 2 · Pela folha, item por item</h3><span class="small muted">Toque no sistema para começar ou continuar.</span>`}
     ${tpl?`<div class="card small">Escolha o próximo checklist. Começa direto com o mesmo escopo (<b>${ESC[tpl.escopo]}</b>), local e mantenedores do anterior.</div>`:''}
     ${cards}`:''}
-    <button class="btn ghost full" data-act="browse">Histórico por data</button></div>`;
+    <button class="btn ghost full" data-act="browse">Histórico por data</button>
+    ${(()=>{ const n=CATS.flatMap(c=>inspsFor(m,c.id)).filter(i=>dayKey(i.inicio)===today).length;
+      return n||noteGet(m).trim()?`<button class="btn danger full" data-act="askReset">Apagar o checklist de hoje do MHC ${h(m)} e começar do zero</button>`:''; })()}
+    </div>`;
 }
 
 function vCat(){
@@ -1287,6 +1290,13 @@ function vEditAsk(){
    <button class="btn y full" data-act="editYes">Sim, editar</button>
    <button class="btn ghost full" data-act="editNo">Cancelar</button></div></div>`;
 }
+function vReset(){
+  if(V.v!=='mhc'||!V.askReset) return '';
+  const m=V.mhc, today=dayKey(Date.now()), list=CATS.flatMap(c=>inspsFor(m,c.id)).filter(i=>dayKey(i.inicio)===today);
+  return `<div class="modal" role="dialog" aria-modal="true" aria-labelledby="rsT"><div class="card stack"><h3 id="rsT">Começar o MHC ${h(m)} do zero?</h3>
+    <p style="margin:0">Apaga os checklists de hoje deste MHC${list.length?` (${list.map(i=>CAT[i.cat].nome).join(', ')})`:''}, a anotação de hoje e o escopo escolhido. Os de outros dias não mudam. Não dá para desfazer.</p>
+    <button class="btn danger full" data-act="doReset">Apagar e começar do zero</button><button class="btn ghost full" data-act="noReset">Cancelar</button></div></div>`;
+}
 function vConfirm(){
   if(V.confirmR){ const i=TEAM.insp||{};
     return `<div class="modal" role="dialog" aria-modal="true"><div class="card stack"><h3>Apagar checklist da equipe?</h3>
@@ -1331,7 +1341,7 @@ function render(){
     case 'next': html=vNext(); break;
     default: html=vHome();
   }
-  $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
+  $app.innerHTML=html+vReset()+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
   if(V.v==='wiz'||V.v==='mhc'||(V.v==='sheet'&&!V.ro)) loadNotes();
 }
 function softRender(){
@@ -1378,6 +1388,14 @@ document.addEventListener('click',e=>{
   if(act==='fillFinish'){ const insp=S.insps[V.id]; insp.fim=Date.now(); touch(insp); schedule(0); toast(CAT[insp.cat].nome+' finalizado'); return go({v:'next',mhc:insp.mhc,done:insp.id}); }
   if(act==='fillEdit'){ const insp=S.insps[b.dataset.id]; return go({v:'fill',id:insp.id,back:Object.assign({},V)}); }
   if(act==='paperFor'){ const insp=S.insps[b.dataset.id]; return openPaperFor(insp,Object.assign({},V)); }
+  if(act==='askReset'){ V.askReset=true; return render(); }
+  if(act==='noReset'){ V.askReset=false; return render(); }
+  if(act==='doReset'){ const m=V.mhc, today=dayKey(Date.now());
+    CATS.flatMap(c=>inspsFor(m,c.id)).filter(i=>dayKey(i.inicio)===today).forEach(i=>{ delete S.insps[i.id]; if(SENT[i.id]) DEL.push(i.id); });
+    saveLocal(); saveSent(); if(DEL.length) schedule(0);
+    delete NOTE[noteKey(m)]; try{ localStorage.setItem(KN,JSON.stringify(NOTE)); }catch(e){}
+    delete DESC[today+'|'+m]; try{ localStorage.setItem(KE,JSON.stringify(DESC)); }catch(e){}
+    toast('MHC '+m+' zerado. Pode começar de novo'); return go({v:'mhc',mhc:m}); }
   if(act==='dayEsc'){ setDayEsc(V.mhc,b.dataset.v); V.qf=null;
     if(CATS.some(c=>inspsFor(V.mhc,c.id).some(i=>dayKey(i.inicio)===dayKey(Date.now())&&i.auto))) quickFill(V.mhc,b.dataset.v,{live:true});
     return render(); }
