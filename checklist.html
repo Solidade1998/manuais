@@ -988,6 +988,20 @@ function vFill(){
     <button class="btn ghost full" data-act="sheet" data-id="${insp.id}">Ver a folha completa</button></div>`;
   return html;
 }
+/* depois de finalizar um sistema: escolher o próximo até acabar */
+function vNext(){
+  const m=V.mhc, today=dayKey(Date.now()), last=S.insps[V.done];
+  const cats=CATS.filter(c=>allowed(c.id)&&hasItems(c));
+  const st=c=>{ const hj=inspsFor(m,c.id).filter(i=>dayKey(i.inicio)===today); return hj.find(i=>i.fim)?'feito':hj.find(i=>!i.fim)?'and':'falta'; };
+  const pend=cats.filter(c=>st(c)!=='feito'), feitos=cats.filter(c=>st(c)==='feito');
+  return topBar(`<b>MHC80-${h(m)}</b>`,true)+`<div class="stack">
+    ${last?`<div class="card" style="border-left:6px solid var(--ok)"><b>${h(CAT[last.cat].nome)} finalizado ✓</b><div class="small muted">${feitos.length} de ${cats.length} sistemas prontos hoje</div></div>`:''}
+    ${pend.length?`<h2>Qual você vai marcar agora?</h2>
+      ${pend.map(c=>`<button class="catcard" data-act="fill" data-c="${c.id}"><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${st(c)==='and'?'<span class="pill p-open">Em andamento</span>':'<span class="pill p-nok">Falta</span>'}</div><span class="small" style="font-weight:700">Abrir a folha e marcar ›</span></button>`).join('')}`
+    :`<h2>Todos os sistemas do MHC ${h(m)} estão prontos 🎉</h2><span class="muted">Agora é só passar tudo para a folha de papel.</span>`}
+    <button class="btn ${pend.length?'ghost':'y'} full" data-act="paper" data-m="${h(m)}">📄 Passar para a folha${pend.length?' o que já está pronto':''}</button>
+    <button class="btn ghost full" data-act="openMhc" data-m="${h(m)}">Voltar para o MHC ${h(m)}</button></div>`;
+}
 function vQuickResult(r){
   return `<section class="card stack" style="gap:8px;border-left:6px solid var(--ok)">
     <b>Preenchido pelas anotações</b>
@@ -1314,6 +1328,7 @@ function render(){
     case 'notes': html=vNotes(); break;
     case 'paper': html=vPaper(); break;
     case 'fill': html=vFill(); break;
+    case 'next': html=vNext(); break;
     default: html=vHome();
   }
   $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
@@ -1335,6 +1350,7 @@ function goMhc(){
   go({v:'mhc',mhc:m});
 }
 function back(){
+  if(V.v==='next') return go({v:'mhc',mhc:V.mhc});
   if((V.v==='wiz'&&V.editOne)||(V.v==='reg'&&V.retSheet)) return go(V.retSheet);
   if(V.v==='notes'){ if(V.mhc&&!V.direct) return go({v:'notes'}); return go({v:'home'}); }
   if(V.v==='mhc') go({v:'home'});
@@ -1359,7 +1375,7 @@ document.addEventListener('click',e=>{
     touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y);
     if(r==='nok'){ const f=document.getElementById('ff'+it.key); if(f&&!f.value) f.focus(); } return; }
   if(act==='fillRest'){ const insp=S.insps[V.id]; scoped(insp).forEach(i=>{ const a=insp.ans[i.key]||{}; if(!a.r){ a.r='ok'; a.t=Date.now(); insp.ans[i.key]=a; } }); touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y); return; }
-  if(act==='fillFinish'){ const insp=S.insps[V.id]; insp.fim=Date.now(); touch(insp); schedule(0); toast('Finalizado. Agora é só passar para o papel'); return openPaperFor(insp,V.back||{v:'mhc',mhc:insp.mhc}); }
+  if(act==='fillFinish'){ const insp=S.insps[V.id]; insp.fim=Date.now(); touch(insp); schedule(0); toast(CAT[insp.cat].nome+' finalizado'); return go({v:'next',mhc:insp.mhc,done:insp.id}); }
   if(act==='fillEdit'){ const insp=S.insps[b.dataset.id]; return go({v:'fill',id:insp.id,back:Object.assign({},V)}); }
   if(act==='paperFor'){ const insp=S.insps[b.dataset.id]; return openPaperFor(insp,Object.assign({},V)); }
   if(act==='dayEsc'){ setDayEsc(V.mhc,b.dataset.v); V.qf=null;
