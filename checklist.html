@@ -557,15 +557,19 @@ function quickFill(mhc,escopo,opt={}){
     items.forEach(it=>{ const a=insp.ans[it.key]; if(!a||a.manual) return;
       if(a.src==='nota'||(a.r==='nok'&&NOTE_FALHA_RE.test(a.falha||''))) insp.ans[it.key]={r:'ok',t:Date.now(),...(a.os?{os:a.os}:{})}; });
     const nok=(it,f)=>{ setNok(insp,it,Object.assign({},f,{src:'nota'})); noks.push(it.seq); };
+    const fora=[];
     tips.forEach(t=>{ const {found,rest}=findings(t);
       found.forEach(f=>{ if(f.cat&&f.cat!==c.id) return; if(!f.cat) return; // número solto: aplicar na mão
-        const k=suggestKey(items,f.seq,f.cond); const it=items.find(i=>i.key===k); if(it) nok(it,f); });
+        const k=suggestKey(items,f.seq,f.cond); const it=items.find(i=>i.key===k);
+        if(it) nok(it,f);
+        else { const ie=itemEscOf(c.id,f.seq,f.cond); if(ie&&LV[ie]>LV[insp.escopo]) fora.push({seq:f.seq,falha:f.falha,esc:ie}); } });
       if(c.id===cats[0].id){ rest.forEach(r=>loose.push(r.txt)); found.filter(f=>!f.cat).forEach(f=>loose.push(`${f.seq} - ${f.falha}`)); } });
     if(c.id==='mec'&&!frota().rasp.includes(mhc)){ const r=MEC_RULES[1]; const it=items.find(i=>i.cond===DES&&i.seq==='21');
       if(it) nok(it,{falha:r.falha(),acao:r.acao,mat:partTxt(r.pn)}); }
     if(!opt.live||insp.auto) items.forEach(it=>{ const a=insp.ans[it.key]||{}; if(!a.r){ a.r='ok'; a.t=Date.now(); insp.ans[it.key]=a; } });
     touch(insp);
-    report.push({id:insp.id,cat:c.id,noks:scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok').map(i=>i.seq+(i.cond===LIG?' (lig.)':''))});
+    insp.foraEscopo=fora; // anotado mas é de escopo maior (ex.: raspador 21 é mensal)
+    report.push({id:insp.id,cat:c.id,fora,noks:scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok').map(i=>i.seq+(i.cond===LIG?' (lig.)':''))});
   }
   return {report,loose,tips:tips.length};
 }
@@ -900,7 +904,7 @@ function vPaper(){
       </div></section>
       <span class="small muted">Toque na linha depois de passar para o papel · ${feitos} de ${sc.length} passados</span>
       <div class="mlist">${rows.map(i=>{ const a=insp.ans[i.key]||{};
-        const res=!i.inScope?`<span class="res out">${i.rotaOut?'rota feita em outra inspeção':'fora do escopo · deixar em branco'}</span>`
+        const res=!i.inScope?(i.rotaOut?`<span class="res out">rota feita em outra inspeção</span>`:`<span class="res na">( X ) NÃO SE APLICA <span class="small">· item ${ESC[i.esc].toLowerCase()}</span></span>`)
           :a.r?`<span class="res ${a.r}">${RES_TXT[a.r]}</span>`:`<span class="res out" style="color:var(--warn)">SEM RESPOSTA</span>`;
         return `<button class="pp-row ${i.inScope&&pp[i.key]?'done':''}" ${i.inScope?`data-act="ppTick" data-k="${i.key}"`:''}>
           <span class="sq">${h(i.seq)}</span><span class="mid"><span class="sub">${h(i.sis)} · ${h(i.sub)} · ${ESC[i.esc]}</span>
@@ -925,12 +929,59 @@ function vPaper(){
     <button class="btn ghost full" data-act="sheetQ" data-id="${insp.id}">Corrigir respostas (abrir a folha do app)</button></div>`;
   return html;
 }
+/* anotação de item de escopo maior que o de hoje: aviso em vermelho, não entra */
+function foraBox(list){
+  if(!list||!list.length) return '';
+  return `<div class="small" style="color:var(--nok);font-weight:700;border:2px solid var(--nok);border-radius:8px;padding:8px 10px;text-align:left">
+    ${list.map(f=>`Seq ${h(f.seq)} · ${h(f.falha)}: é escopo ${ESC[f.esc].toLowerCase()}, não entrou neste checklist.`).join('<br>')}</div>`;
+}
+/* ===================== FOLHA ABERTA PARA PREENCHER =====================
+   Tocar no sistema na tela do MHC abre todos os itens do escopo do dia de uma vez,
+   cada um com Ok / Não Ok / N/A. Itens de escopo maior não aparecem (na folha
+   saem como "Não se aplica"). */
+function ensureToday(mhc,catId){
+  const today=dayKey(Date.now()), c=CAT[catId];
+  let insp=inspsFor(mhc,catId).find(i=>dayKey(i.inicio)===today&&!i.fim)||inspsFor(mhc,catId).find(i=>dayKey(i.inicio)===today);
+  if(insp) return insp;
+  const esc=dayEsc(mhc), e=(c.esc||['D','S','M']).includes(esc)?esc:(c.esc||['D'])[0];
+  const id=newId(), tpl=Object.values(S.insps).sort((a,b)=>(b.upd||0)-(a.upd||0))[0]||{};
+  insp={id,mhc,cat:catId,escopo:e,rota:'des',oficina:S.prof.oficina||tpl.oficina||'',patio:S.prof.patio||tpl.patio||'',
+    mant:JSON.parse(JSON.stringify(S.prof.mant&&S.prof.mant.some(x=>x.nome)?S.prof.mant:(tpl.mant||[]))),inicio:Date.now(),fim:0,ans:{},cp:{}};
+  S.insps[id]=insp; touch(insp); return insp;
+}
+function vFill(){
+  const insp=S.insps[V.id]; if(!insp) return vHome();
+  const c=CAT[insp.cat], st=stats(insp), sc=scoped(insp), nfora=itemsOf(insp).filter(i=>!i.inScope&&!i.rotaOut).length;
+  let html=topBar(`MHC80-${h(insp.mhc)} · <b>${h(c.nome)}</b>`,true)+`<div class="stack">
+    <div class="row" style="justify-content:space-between"><span class="pill p-open">${ESC[insp.escopo]}</span><span class="small muted">${st.done} de ${st.tot} marcados${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}</span></div>
+    ${bar(st)}
+    ${foraBox(insp.foraEscopo)}
+    ${nfora?`<span class="small muted">${nfora} ite${nfora>1?'ns':'m'} de escopo maior não aparece${nfora>1?'m':''} aqui e ${nfora>1?'vão':'vai'} para a folha como <b>Não se aplica</b>.</span>`:''}
+    ${insp.fim?`<div class="card small">Finalizado em ${fmt(insp.fim)}. Mudar uma resposta marca como editado.</div>`:''}`;
+  c.conds.forEach((cd,ci)=>{
+    const rows=sc.filter(i=>i.ci===ci); if(!rows.length) return;
+    html+=`<div class="cond ${cd.c===LIG?'lig':''}">${cd.c===LIG?'⚠ ':''}${h(cd.c)}</div><div class="mlist">`+rows.map(i=>{ const a=insp.ans[i.key]||{};
+      return `<div class="pp-row" style="flex-direction:column;gap:8px">
+        <div class="row" style="flex-wrap:nowrap;align-items:flex-start;width:100%"><span class="sq" style="font-family:var(--display);font-weight:700;font-size:24px;min-width:48px">${h(i.seq)}</span>
+          <span class="mid" style="flex:1"><span class="sub">${h(i.sub)} · ${ESC[i.esc]}</span><span style="font-size:15px">${h(i.atv)}</span>
+          <span class="small muted">Esperado: ${h(i.esp)}</span>${i.tag?`<span class="small" style="color:var(--warn);font-weight:700">${h(i.tag)}</span>`:''}</span></div>
+        <div class="seg" role="group" aria-label="Resultado seq ${h(i.seq)}" style="width:100%">${['ok','nok','na'].map(r=>`<button data-act="fillAns" data-k="${i.key}" data-r="${r}" class="${a.r===r?'on':''}" style="${a.r===r?(r==='ok'?'background:var(--ok)':r==='nok'?'background:var(--nok)':'background:var(--na)')+';color:#fff':''}">${r==='ok'?'Ok':r==='nok'?'Não Ok':'N/A'}</button>`).join('')}</div>
+        ${a.r==='nok'?`<div class="fld" style="width:100%"><label for="ff${i.key}">Falha encontrada</label><input id="ff${i.key}" data-rk="${i.key}" data-f="falha" value="${h(a.falha)}" placeholder="descreva o problema"></div>
+          ${a.mat||a.acao?`<span class="small muted">${a.acao?'Ação: '+h(a.acao):''}${a.mat?' · Material: '+h(a.mat):''}</span>`:''}`:''}
+      </div>`; }).join('')+`</div>`;
+  });
+  html+=`<button class="btn alt full" data-act="fillRest">Marcar o que falta como Ok</button>
+    ${st.nok?`<button class="btn full" data-act="reg" data-id="${insp.id}">Registro de tráfego (${st.nok}) · ação, material e OS</button>`:''}
+    ${insp.fim?'':`<button class="btn y full" data-act="fillFinish" ${st.done<st.tot?'disabled':''}>${st.done<st.tot?`Faltam ${st.tot-st.done} itens para finalizar`:'Finalizar este checklist'}</button>`}
+    <button class="btn ghost full" data-act="sheet" data-id="${insp.id}">Ver a folha completa</button></div>`;
+  return html;
+}
 function vQuickResult(r){
   return `<section class="card stack" style="gap:8px;border-left:6px solid var(--ok)">
     <b>Preenchido pelas anotações</b>
     <button class="btn full" data-act="paper" data-m="${h(r.report[0]?S.insps[r.report[0].id].mhc:'')}">📄 Passar para a folha, uma por vez</button>
     ${r.report.map(x=>`<button class="catcard" data-act="sheetQ" data-id="${x.id}"><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${h(CAT[x.cat].nome)}</span>${x.noks.length?`<span class="pill p-nok">${x.noks.length} Não Ok</span>`:'<span class="pill p-ok">Tudo Ok</span>'}</div>
-      ${x.noks.length?`<span class="small muted">Seq ${x.noks.map(h).join(', ')}</span>`:''}<span class="small" style="font-weight:700">Conferir a folha ›</span></button>`).join('')}
+      ${x.noks.length?`<span class="small muted">Seq ${x.noks.map(h).join(', ')}</span>`:''}${foraBox(x.fora)}<span class="small" style="font-weight:700">Conferir a folha ›</span></button>`).join('')}
     ${r.loose.length?`<div class="small" style="color:var(--warn)"><b>Não reconheci, aplique na mão:</b> ${r.loose.map(h).join(' · ')}</div>`:''}
     <button class="btn ghost full" data-act="qfClose">Fechar</button></section>`;
 }
@@ -939,14 +990,14 @@ function vMhc(){
   const cards=CATS.filter(c=>allowed(c.id)).map(c=>{
     if(!hasItems(c)) return `<button class="catcard" disabled><span class="nm">${c.nome}</span><span class="small muted">Itens ainda não cadastrados no app.</span></button>`;
     const all=inspsFor(m,c.id), hoje=all.filter(i=>dayKey(i.inicio)===today), last=all[0];
-    const feito=hoje.find(i=>i.fim), andamento=hoje.find(i=>!i.fim)||all.find(i=>!i.fim);
+    const feito=hoje.find(i=>i.fim), andamento=hoje.find(i=>!i.fim); // só hoje; os outros dias ficam no histórico
     let status, info='', b='';
     if(feito){ const st=stats(feito); status=`<span class="pill p-ok">Feito hoje</span>`; info=`<span class="small muted">${ESC[feito.escopo]} · ${fmtH(feito.inicio)}${st.nok?` · <b style="color:var(--nok)">${st.nok} Não Ok</b>`:''}</span>`; b=bar(st); }
     else if(andamento){ const st=stats(andamento); status=`<span class="pill p-open">Em andamento ${st.done}/${st.tot}</span>`; info=`<span class="small muted">Início ${fmt(andamento.inicio)} · ${ESC[andamento.escopo]}</span>`; b=bar(st); }
     else { status=`<span class="pill p-nok">Falta hoje</span>`; info=`<span class="small muted">${last?'Último: '+fmtD(last.inicio)+' · '+ESC[last.escopo]:'Nenhuma inspeção ainda'}</span>`; }
     const quick=tpl&&!feito&&!andamento&&(c.esc||['D','S','M']).includes(tpl.escopo);
-    const act=andamento&&tpl?`data-act="wiz" data-id="${andamento.id}"`:quick?`data-act="quick" data-c="${c.id}"`:`data-act="openCat" data-c="${c.id}"`;
-    return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}${quick?`<span class="small" style="font-weight:700">Toque para começar agora ›</span>`:''}</button>`;
+    const act=`data-act="fill" data-c="${c.id}"`;
+    return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}<span class="small" style="font-weight:700">${feito||andamento?'Abrir a folha ›':'Toque para abrir a folha e marcar ›'}</span></button>`;
   }).join('');
   const minha=noteGet(m).trim(), nOpen=V.noteOpen===undefined?!!minha:V.noteOpen;
   const fora=frota().fora.includes(m);
@@ -1120,7 +1171,7 @@ function vSheet(){
     const rows=all.filter(i=>i.ci===ci);
     html+=`<h3>Condição: ${h(cd.c)}</h3><div class="tblwrap"><table><thead><tr><th>Seq</th><th>Atividade</th><th>Resultado encontrado</th><th>Esc.</th></tr></thead><tbody>`+
       rows.map(i=>{ const a=insp.ans[i.key]||{}; const pos=sc.findIndex(x=>x.key===i.key);
-        if(!i.inScope) return `<tr class="out"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}</td><td class="small">${i.rotaOut?'rota feita em outra inspeção':'fora do escopo'}</td><td class="esc">${i.esc}</td></tr>`;
+        if(!i.inScope) return `<tr class="out"><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}</td><td>${i.rotaOut?'<span class="small">rota feita em outra inspeção</span>':rbox('na')}</td><td class="esc">${i.esc}</td></tr>`;
         return `<tr ${ro?'':`class="click" data-act="goto" data-p="${pos}"`}><td class="seq">${h(i.seq)}</td><td><div class="sub">${h(i.sub)}</div>${h(i.atv)}${a.r==='nok'&&!(a.falha||'').trim()?'<div class="pend">Falta descrever a falha</div>':''}</td><td>${a.r?rbox(a.r):'<span class="pend">Sem resposta</span>'}</td><td class="esc">${i.esc}</td></tr>`;
       }).join('')+`</tbody></table></div>`;
   });
@@ -1229,7 +1280,7 @@ function textOf(insp){
   L.push(`Oficina: ${insp.oficina||'—'} · Pátio: ${insp.patio||'—'}`);
   (insp.mant||[]).filter(m=>m.nome).forEach(m=>L.push(`Mantenedor: ${m.nome} / ${m.mat} / ${m.turma}`));
   c.conds.forEach((cd,ci)=>{ L.push(''); L.push(`— ${cd.c.toUpperCase()} —`);
-    itemsOf(insp).filter(i=>i.ci===ci&&i.inScope).forEach(i=>{ const a=insp.ans[i.key]||{}; L.push(`${i.seq}. ${a.r?RLBL[a.r]:'(sem resposta)'} – ${i.sub}`); }); });
+    itemsOf(insp).filter(i=>i.ci===ci&&!i.rotaOut).forEach(i=>{ const a=insp.ans[i.key]||{}; L.push(`${i.seq}. ${!i.inScope?'Não se aplica ('+ESC[i.esc].toLowerCase()+')':a.r?RLBL[a.r]:'(sem resposta)'} – ${i.sub}`); }); });
   const reg=scoped(insp).filter(i=>(insp.ans[i.key]||{}).r==='nok');
   if(reg.length){ L.push(''); L.push('— REGISTRO DE SOLICITAÇÕES DE TRÁFEGO —');
     reg.forEach(i=>{ const a=insp.ans[i.key]; L.push(`Seq ${i.seq}: ${a.falha||'?'} | Ação: ${a.acao||'-'} | Material: ${a.mat||'-'}${a.os?' | OS '+a.os:''}${a.corr?' | Corrigido':''}`); }); }
@@ -1250,6 +1301,7 @@ function render(){
     case 'browse': html=vBrowse(); break;
     case 'notes': html=vNotes(); break;
     case 'paper': html=vPaper(); break;
+    case 'fill': html=vFill(); break;
     default: html=vHome();
   }
   $app.innerHTML=html+vConfirm()+vAsk()+vEditAsk()+vApply()+vQfAsk();
@@ -1287,6 +1339,15 @@ document.addEventListener('click',e=>{
   if(act==='back') return back();
   if(act==='goMhc') return goMhc();
   if(act==='openMhc') return go({v:'mhc',mhc:b.dataset.m});
+  if(act==='fill'){ if(!dayEsc(V.mhc)&&b.dataset.c!=='ele'){ toast('Escolha primeiro: Diário, Semanal ou Mensal'); return; }
+    const insp=ensureToday(V.mhc,b.dataset.c); return go({v:'fill',id:insp.id,back:{v:'mhc',mhc:V.mhc}}); }
+  if(act==='fillAns'){ const insp=S.insps[V.id], it=scoped(insp).find(i=>i.key===b.dataset.k), r=b.dataset.r;
+    if(r==='nok') setNok(insp,it,{}); else { const a=insp.ans[it.key]||{}; a.r=r; a.t=Date.now(); insp.ans[it.key]=a; }
+    insp.ans[it.key].manual=true; delete insp.ans[it.key].src; if(insp.fim) insp.editado=Date.now();
+    touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y);
+    if(r==='nok'){ const f=document.getElementById('ff'+it.key); if(f&&!f.value) f.focus(); } return; }
+  if(act==='fillRest'){ const insp=S.insps[V.id]; scoped(insp).forEach(i=>{ const a=insp.ans[i.key]||{}; if(!a.r){ a.r='ok'; a.t=Date.now(); insp.ans[i.key]=a; } }); touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y); return; }
+  if(act==='fillFinish'){ const insp=S.insps[V.id]; insp.fim=Date.now(); touch(insp); schedule(0); toast('Checklist finalizado'); return go(V.back||{v:'mhc',mhc:insp.mhc}); }
   if(act==='dayEsc'){ setDayEsc(V.mhc,b.dataset.v); V.qf=null;
     if(CATS.some(c=>inspsFor(V.mhc,c.id).some(i=>dayKey(i.inicio)===dayKey(Date.now())&&i.auto))) quickFill(V.mhc,b.dataset.v,{live:true});
     return render(); }
@@ -1317,7 +1378,7 @@ document.addEventListener('click',e=>{
     return go({v:'wiz',id:i.id,pos});
   }
   if(act==='sheet') return go({v:'sheet',id:b.dataset.id});
-  if(act==='reg') return go({v:'reg',id:b.dataset.id});
+  if(act==='reg') return go({v:'reg',id:b.dataset.id,back:V.v==='fill'?Object.assign({},V):undefined});
   if(act==='askNo'){ V.ask=null; if(V.editOne){ toast('Resposta corrigida'); return go(V.retSheet); } V.pos++; render(); window.scrollTo(0,0); return; }
   if(act==='askYes'){ const k=V.ask; go({v:'reg',id:V.id,only:k,ret:V.pos+1,retSheet:V.editOne?V.retSheet:null});
     const f=document.getElementById('f'+k+'a'); if(f) f.focus(); return; }
@@ -1450,7 +1511,7 @@ document.addEventListener('input',e=>{
     const insp=curInsp(), it=scoped(insp)[V.pos], a=insp.ans[it.key]; if(!a) return;
     a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; touch(insp); return;
   }
-  if(t.dataset.rk && V.v==='reg'){
+  if(t.dataset.rk && (V.v==='reg'||V.v==='fill')){
     const insp=curInsp(), a=insp.ans[t.dataset.rk]; if(!a) return;
     a[t.dataset.f]= t.type==='checkbox'? t.checked : t.value; if(t.dataset.f!=='os'&&t.dataset.f!=='corr'){ a.manual=true; delete a.src; } touch(insp); return;
   }
