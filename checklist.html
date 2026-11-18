@@ -892,7 +892,10 @@ function vPaper(){
   const tabName=x=>x.kind==='reg'?`${x.cat.nome} · verso`:`${x.cat.nome}${x.cat.conds.length>1?' · '+(x.cond===LIG?'ligado':'desligado'):''}`;
   let html=topBar(`Passar para a folha · <b>MHC ${h(m)}</b>`,true)+`<div class="stack">
     ${days.length>1?`<div class="pp-tabs">${days.map(k=>`<button class="chip ${k===day?'on':''}" data-act="ppDay" data-v="${k}">${dayLabel(k)}</button>`).join('')}</div>`:`<span class="small muted">${dayLabel(day)}</span>`}
-    <div class="pp-tabs">${docs.map((x,i)=>`<button class="chip ${i===ix?'on':''}" data-act="ppGo" data-i="${i}">${h(tabName(x))}</button>`).join('')}</div>`;
+    <div class="pp-tabs">${docs.map((x,i)=>`<button class="chip ${i===ix?'on':''}" data-act="ppGo" data-i="${i}">${h(tabName(x))}</button>`).join('')}</div>
+    <div class="row" style="justify-content:space-between;flex-wrap:nowrap">
+      <button class="btn ghost" style="flex:1" data-act="ppGo" data-i="${ix-1}" ${ix<=0?'disabled':''}>‹ Folha anterior</button>
+      <button class="btn y" style="flex:1" data-act="ppGo" data-i="${ix+1}" ${ix>=docs.length-1?'disabled':''}>Próxima folha ›</button></div>`;
   const insp=d.insp, pp=insp.pp||{}, mant=(insp.mant||[]).filter(x=>x.nome||x.mat);
   if(d.kind==='route'){
     const rows=itemsOf(insp).filter(i=>i.ci===d.ci), sc=rows.filter(i=>i.inScope), feitos=sc.filter(i=>pp[i.key]).length;
@@ -935,10 +938,7 @@ function vPaper(){
           ${a.os?`<dt>Nº OS</dt><dd>${h(a.os)}</dd>`:''}${a.corr?`<dt>Obs.</dt><dd>(X) Corrigido</dd>`:''}</dl></button>`; }).join('')
       :`<div class="card">Nenhum Não Ok neste sistema. O verso fica em branco.</div>`}`;
   }
-  html+=`<div class="row" style="justify-content:space-between">
-    <button class="btn ghost" data-act="ppGo" data-i="${ix-1}" ${ix<=0?'disabled':''}>‹ Folha anterior</button>
-    <button class="btn y" data-act="ppGo" data-i="${ix+1}" ${ix>=docs.length-1?'disabled':''}>Próxima folha ›</button></div>
-    <button class="btn ghost full" data-act="fillEdit" data-id="${insp.id}">Corrigir respostas deste sistema</button></div>`;
+  html+=`<button class="btn ghost full" data-act="fillEdit" data-id="${insp.id}">Corrigir respostas deste sistema</button></div>`;
   return html;
 }
 /* anotação de item de escopo maior que o de hoje: aviso em vermelho, não entra */
