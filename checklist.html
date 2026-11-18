@@ -868,21 +868,27 @@ function noteAct(m){
    Uma folha por vez, na ordem do papel: cada sistema e, dentro dele, cada rota
    (motor desligado / ligado), e no fim o verso (registro de tráfego) do sistema.
    Tocar numa linha marca "passado" para saber onde parou. */
-function paperDocs(mhc,day){
+function paperDocs(mhc,day,pick){
   const out=[];
   CATS.filter(c=>allowed(c.id)&&hasItems(c)).forEach(c=>{
-    const insp=inspsFor(mhc,c.id).filter(i=>dayKey(i.inicio)===day)[0]; if(!insp) return;
+    const insp=(pick&&pick[c.id]&&S.insps[pick[c.id]])||inspsFor(mhc,c.id).filter(i=>dayKey(i.inicio)===day)[0]; if(!insp) return;
     c.conds.forEach((cd,ci)=>out.push({kind:'route',insp,cat:c,ci,cond:cd.c}));
     out.push({kind:'reg',insp,cat:c});
   });
   return out;
+}
+/* abre o modo "passar para a folha" já no sistema deste checklist (qualquer dia) */
+function openPaperFor(insp,back){
+  const day=dayKey(insp.inicio), docs=paperDocs(insp.mhc,day,{[insp.cat]:insp.id});
+  const ix=Math.max(0,docs.findIndex(d=>d.insp.id===insp.id));
+  return go({v:'paper',mhc:insp.mhc,day,ix,pick:{[insp.cat]:insp.id},back});
 }
 function paperDays(mhc){ return [...new Set(inspsFor(mhc).map(i=>dayKey(i.inicio)))].sort().reverse(); }
 const RES_TXT={ok:'( X ) OK',nok:'( X ) NÃO OK',na:'( X ) NÃO SE APLICA'};
 function vPaper(){
   const m=V.mhc, days=paperDays(m); const day=V.day||days[0];
   if(!day) return topBar(`Folha · <b>MHC ${h(m)}</b>`,true)+`<p class="muted">Nenhum checklist deste MHC ainda.</p>`;
-  const docs=paperDocs(m,day); const ix=Math.min(V.ix||0,docs.length-1), d=docs[ix];
+  const docs=paperDocs(m,day,V.pick); const ix=Math.min(V.ix||0,docs.length-1), d=docs[ix];
   const tabName=x=>x.kind==='reg'?`${x.cat.nome} · verso`:`${x.cat.nome}${x.cat.conds.length>1?' · '+(x.cond===LIG?'ligado':'desligado'):''}`;
   let html=topBar(`Passar para a folha · <b>MHC ${h(m)}</b>`,true)+`<div class="stack">
     ${days.length>1?`<div class="pp-tabs">${days.map(k=>`<button class="chip ${k===day?'on':''}" data-act="ppDay" data-v="${k}">${dayLabel(k)}</button>`).join('')}</div>`:`<span class="small muted">${dayLabel(day)}</span>`}
@@ -902,6 +908,12 @@ function vPaper(){
         <div><span>Visita · Duração</span><b>N/A · Não medido</b></div>
         <div style="grid-column:1/-1"><span>Mantenedores (nome / matrícula / turma)</span>${mant.length?mant.map(x=>`<b>${h(x.nome)} / ${h(x.mat)} / ${h(x.turma)}</b>`).join('<br>'):'<b>—</b>'}</div>
       </div></section>
+      ${(()=>{ const nk=sc.filter(i=>(insp.ans[i.key]||{}).r==='nok'), nas=sc.filter(i=>(insp.ans[i.key]||{}).r==='na'), fe=rows.filter(i=>!i.inScope&&!i.rotaOut);
+        return `<section class="card stack" style="gap:6px">
+          <b>Resumo desta folha</b>
+          <span><b style="color:var(--ok)">${sc.length-nk.length-nas.length} Ok</b> · <b style="color:var(--nok)">${nk.length} Não Ok</b> · <b>${nas.length+fe.length} Não se aplica</b>${fe.length?` <span class="small muted">(${fe.length} de escopo maior)</span>`:''}</span>
+          ${nk.length?`<div class="small" style="color:var(--nok)">${nk.map(i=>`<b>Seq ${h(i.seq)}</b>: ${h((insp.ans[i.key]||{}).falha||'falta descrever a falha')}`).join('<br>')}</div>`:'<span class="small muted">Nenhum Não Ok nesta rota.</span>'}
+        </section>${d.ci===0?foraBox(insp.foraEscopo):''}`; })()}
       <span class="small muted">Toque na linha depois de passar para o papel · ${feitos} de ${sc.length} passados</span>
       <div class="mlist">${rows.map(i=>{ const a=insp.ans[i.key]||{};
         const res=!i.inScope?(i.rotaOut?`<span class="res out">rota feita em outra inspeção</span>`:`<span class="res na">( X ) NÃO SE APLICA <span class="small">· item ${ESC[i.esc].toLowerCase()}</span></span>`)
@@ -926,7 +938,7 @@ function vPaper(){
   html+=`<div class="row" style="justify-content:space-between">
     <button class="btn ghost" data-act="ppGo" data-i="${ix-1}" ${ix<=0?'disabled':''}>‹ Folha anterior</button>
     <button class="btn y" data-act="ppGo" data-i="${ix+1}" ${ix>=docs.length-1?'disabled':''}>Próxima folha ›</button></div>
-    <button class="btn ghost full" data-act="sheetQ" data-id="${insp.id}">Corrigir respostas (abrir a folha do app)</button></div>`;
+    <button class="btn ghost full" data-act="fillEdit" data-id="${insp.id}">Corrigir respostas deste sistema</button></div>`;
   return html;
 }
 /* anotação de item de escopo maior que o de hoje: aviso em vermelho, não entra */
@@ -996,8 +1008,8 @@ function vMhc(){
     else if(andamento){ const st=stats(andamento); status=`<span class="pill p-open">Em andamento ${st.done}/${st.tot}</span>`; info=`<span class="small muted">Início ${fmt(andamento.inicio)} · ${ESC[andamento.escopo]}</span>`; b=bar(st); }
     else { status=`<span class="pill p-nok">Falta hoje</span>`; info=`<span class="small muted">${last?'Último: '+fmtD(last.inicio)+' · '+ESC[last.escopo]:'Nenhuma inspeção ainda'}</span>`; }
     const quick=tpl&&!feito&&!andamento&&(c.esc||['D','S','M']).includes(tpl.escopo);
-    const act=`data-act="fill" data-c="${c.id}"`;
-    return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}<span class="small" style="font-weight:700">${feito||andamento?'Abrir a folha ›':'Toque para abrir a folha e marcar ›'}</span></button>`;
+    const act=feito&&!andamento?`data-act="paperFor" data-id="${feito.id}"`:`data-act="fill" data-c="${c.id}"`;
+    return `<button class="catcard" ${act}><div class="row" style="justify-content:space-between;width:100%"><span class="nm">${c.nome}</span>${status}</div>${info}${b}<span class="small" style="font-weight:700">${feito&&!andamento?'Ver para passar no papel ›':andamento?'Abrir a folha ›':'Toque para abrir a folha e marcar ›'}</span></button>`;
   }).join('');
   const minha=noteGet(m).trim(), nOpen=V.noteOpen===undefined?!!minha:V.noteOpen;
   const fora=frota().fora.includes(m);
@@ -1347,7 +1359,9 @@ document.addEventListener('click',e=>{
     touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y);
     if(r==='nok'){ const f=document.getElementById('ff'+it.key); if(f&&!f.value) f.focus(); } return; }
   if(act==='fillRest'){ const insp=S.insps[V.id]; scoped(insp).forEach(i=>{ const a=insp.ans[i.key]||{}; if(!a.r){ a.r='ok'; a.t=Date.now(); insp.ans[i.key]=a; } }); touch(insp); const y=window.scrollY; render(); window.scrollTo(0,y); return; }
-  if(act==='fillFinish'){ const insp=S.insps[V.id]; insp.fim=Date.now(); touch(insp); schedule(0); toast('Checklist finalizado'); return go(V.back||{v:'mhc',mhc:insp.mhc}); }
+  if(act==='fillFinish'){ const insp=S.insps[V.id]; insp.fim=Date.now(); touch(insp); schedule(0); toast('Finalizado. Agora é só passar para o papel'); return openPaperFor(insp,V.back||{v:'mhc',mhc:insp.mhc}); }
+  if(act==='fillEdit'){ const insp=S.insps[b.dataset.id]; return go({v:'fill',id:insp.id,back:Object.assign({},V)}); }
+  if(act==='paperFor'){ const insp=S.insps[b.dataset.id]; return openPaperFor(insp,Object.assign({},V)); }
   if(act==='dayEsc'){ setDayEsc(V.mhc,b.dataset.v); V.qf=null;
     if(CATS.some(c=>inspsFor(V.mhc,c.id).some(i=>dayKey(i.inicio)===dayKey(Date.now())&&i.auto))) quickFill(V.mhc,b.dataset.v,{live:true});
     return render(); }
@@ -1415,8 +1429,8 @@ document.addEventListener('click',e=>{
   if(act==='notes') return go({v:'notes'});
   if(act==='paper') return go({v:'paper',mhc:b.dataset.m||V.mhc,ix:0,back:Object.assign({},V)});
   if(act==='ppGo') return go(Object.assign({},V,{ix:+b.dataset.i}));
-  if(act==='ppDay') return go(Object.assign({},V,{day:b.dataset.v,ix:0}));
-  if(act==='ppTick'){ const docs=paperDocs(V.mhc,V.day||paperDays(V.mhc)[0]); const insp=docs[Math.min(V.ix||0,docs.length-1)].insp;
+  if(act==='ppDay') return go(Object.assign({},V,{day:b.dataset.v,ix:0,pick:null}));
+  if(act==='ppTick'){ const docs=paperDocs(V.mhc,V.day||paperDays(V.mhc)[0],V.pick); const insp=docs[Math.min(V.ix||0,docs.length-1)].insp;
     insp.pp=insp.pp||{}; insp.pp[b.dataset.k]=!insp.pp[b.dataset.k]; saveLocal(); const y=window.scrollY; render(); window.scrollTo(0,y); return; }
   if(act==='noteMhc') return go({v:'notes',mhc:b.dataset.m,qfEsc:V.qfEsc});
   if(act==='noteFill'){ V.qf=quickFill(V.mhc,V.qfEsc||'D'); toast('Checklist do MHC '+V.mhc+' preenchido'); render(); window.scrollTo(0,0); return; }
@@ -1489,7 +1503,7 @@ document.addEventListener('click',e=>{
   if(act==='bP') return go(Object.assign({},V,{p:b.dataset.v}));
   if(act==='bD') return go(Object.assign({},V,{d:b.dataset.v}));
   if(act==='bM') return go(Object.assign({},V,{m:b.dataset.v}));
-  if(act==='sheetB') return go({v:'sheet',id:b.dataset.id,back:Object.assign({},V)});
+  if(act==='sheetB'){ const insp=S.insps[b.dataset.id]; return insp?openPaperFor(insp,Object.assign({},V)):null; }
   if(act==='others'){ const i=S.insps[b.dataset.id]; if(!i) return; return go({v:'mhc',mhc:i.mhc,from:i.id}); }
   if(act==='quick'){
     const t=S.insps[V.from]; if(!t) return;
